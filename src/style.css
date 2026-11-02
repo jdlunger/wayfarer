@@ -20,6 +20,10 @@ body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #f4
 #quest:empty { display: none; }
 #quest h3 { margin: 0 0 4px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #e7c27d; }
 #quest .done { color: #9bb39b; text-decoration: line-through; }
+#quest small { color: #d8cdb8; }
+#quest .inv { display: inline-block; margin-top: 4px; font-size: 15px; letter-spacing: .02em; }
+.label.animal .name { font-size: 11px; opacity: .85; }
+.label.animal .bubble { padding: 3px 8px; font-size: 12px; }
 
 #minimap {
   position: fixed; top: 14px; right: 14px; width: 180px; height: 180px; border-radius: 50%;

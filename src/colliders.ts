@@ -71,3 +71,24 @@ export function resolve(p: { x: number; z: number }, radius: number): boolean {
   }
   return hit;
 }
+
+/** Walkable rectangles above the terrain (e.g. the dock). */
+const platforms: { x: number; z: number; hx: number; hz: number; cos: number; sin: number; top: number }[] = [];
+export function addPlatform(x: number, z: number, hx: number, hz: number, rot: number, top: number) {
+  platforms.push({ x, z, hx, hz, cos: Math.cos(rot), sin: Math.sin(rot), top });
+}
+export function platformHeight(x: number, z: number): number {
+  let best = -Infinity;
+  for (const p of platforms) {
+    const wx = x - p.x, wz = z - p.z;
+    const lx = wx * p.cos - wz * p.sin, lz = wx * p.sin + wz * p.cos;
+    if (Math.abs(lx) <= p.hx && Math.abs(lz) <= p.hz && p.top > best) best = p.top;
+  }
+  return best;
+}
+
+/** True if a circle at (x, z) would overlap any collider. */
+export function isBlocked(x: number, z: number, r: number): boolean {
+  const p = { x, z };
+  return resolve(p, r);
+}

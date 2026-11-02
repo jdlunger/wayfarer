@@ -1,14 +1,22 @@
 import * as THREE from 'three';
 import { Simplex2, makeRng, smoothstep, lerp, clamp } from './noise';
+import { platformHeight } from './colliders';
 
-export const WORLD = 1000;
+/** The island used to be 1000 units across; everything is now packed into a smaller one. */
+export const WORLD = 500;
 export const SEG = 250;
+const S = WORLD / 1000;
 export const CELL = WORLD / SEG;
 export const HALF = WORLD / 2;
 export const VILLAGE_H = 5;
 export const WATER_Y = 0;
 /** Players/NPCs can't go past this radius (open sea). */
 export const WORLD_LIMIT = HALF * 0.92;
+/** Flat radius of the village plateau. */
+export const VILLAGE_R = 50;
+/** Small village pond (its own water surface, slightly below the plateau). */
+export const POND = { x: -38, z: 8, r: 5.2, y: VILLAGE_H - 0.3 };
+export const inPond = (x: number, z: number, pad = 0) => Math.hypot(x - POND.x, z - POND.z) < POND.r + pad;
 
 const rng = makeRng(20261102);
 const nHills = new Simplex2(rng);
@@ -21,19 +29,24 @@ export const nDetail = new Simplex2(rng);
 function rawHeight(x: number, z: number): number {
   const r = Math.hypot(x, z);
   const d = r / HALF;
-  const coast = 0.8 + 0.13 * nCoast.fbm(x * 0.0028 + 11, z * 0.0028 - 7, 3);
+  // Noise is sampled in "old island" units so the landscape keeps its shape, just compressed.
+  const ux = x / S, uz = z / S, ur = r / S;
+  const coast = 0.8 + 0.13 * nCoast.fbm(ux * 0.0028 + 11, uz * 0.0028 - 7, 3);
   const island = 1 - smoothstep(coast - 0.22, coast, d);
 
-  let h = nHills.fbm(x * 0.006, z * 0.006, 4) * 9 + 7;
+  let h = nHills.fbm(ux * 0.006, uz * 0.006, 4) * 8 + 7;
   const mountainMask =
-    smoothstep(0.0, 0.45, nMask.fbm(x * 0.0022 + 3, z * 0.0022 + 9, 2)) * smoothstep(90, 210, r);
-  h += nMount.ridged(x * 0.007, z * 0.007, 4) * 62 * mountainMask;
+    smoothstep(0.0, 0.45, nMask.fbm(ux * 0.0022 + 3, uz * 0.0022 + 9, 2)) * smoothstep(90, 210, ur);
+  h += nMount.ridged(ux * 0.007, uz * 0.007, 4) * 44 * mountainMask;
 
   h = h * island - (1 - island) * 16;
 
-  // Flatten a plateau for the village at the origin.
-  const v = smoothstep(32, 75, r);
-  return lerp(VILLAGE_H + nDetail.noise(x * 0.05, z * 0.05) * 0.15, h, v);
+  // Flatten a plateau for the village at the origin, with a pond dug into it.
+  let base = VILLAGE_H + nDetail.noise(x * 0.05, z * 0.05) * 0.15;
+  const pd = Math.hypot(x - POND.x, z - POND.z);
+  base -= (1 - smoothstep(POND.r - 3, POND.r + 0.8, pd)) * 1.4;
+  const v = smoothstep(VILLAGE_R, VILLAGE_R + 45, r);
+  return lerp(base, h, v);
 }
 
 const W = SEG + 1;
@@ -57,6 +70,16 @@ export function groundHeight(x: number, z: number): number {
   const hd = heights[iz * W + ix + 1];
   if (fx + fz <= 1) return ha + (hd - ha) * fx + (hb - ha) * fz;
   return hc + (hb - hc) * (1 - fx) + (hd - hc) * (1 - fz);
+}
+
+/** Height you can stand on: terrain or a platform such as the dock. */
+export function floorHeight(x: number, z: number): number {
+  return Math.max(groundHeight(x, z), platformHeight(x, z));
+}
+
+/** Places land creatures should not walk into. */
+export function isWet(x: number, z: number): boolean {
+  return floorHeight(x, z) < WATER_Y + 0.35 || inPond(x, z, 0.4);
 }
 
 /** Y component of the surface normal (1 = flat, 0 = vertical). */
@@ -90,10 +113,17 @@ export function terrainColor(x: number, z: number, h: number, ny: number, out: T
     out.copy(C.grass1).lerp(C.grass2, clamp(0.5 + n * 0.8, 0, 1));
     out.lerp(C.forest, smoothstep(0.1, 0.6, nDetail.noise(x * 0.008 + 40, z * 0.008)) * 0.6);
     if (r < 26) out.lerp(C.dirt, smoothstep(26, 14, r) * (0.55 + n * 0.25));
+    // Worn paths: the road out of the gate and a ring lane between the houses.
+    const ang = Math.atan2(z, x);
+    const road = Math.abs(Math.atan2(Math.sin(ang - 3.6 + Math.PI * 2), Math.cos(ang - 3.6))) * r;
+    if (r > 12 && r < 75) out.lerp(C.dirt, smoothstep(3.2, 1.2, road) * 0.6);
+    out.lerp(C.dirt, smoothstep(2.6, 0.6, Math.abs(r - 31)) * 0.35 * smoothstep(0.4, -0.2, n));
+    const pd = Math.hypot(x - POND.x, z - POND.z);
+    if (pd < POND.r + 1.4) out.lerp(pd < POND.r ? C.seabed : C.wetSand, 0.8);
   }
   const rockiness = smoothstep(0.82, 0.68, ny);
   if (rockiness > 0) out.lerp(n > 0 ? C.rock : C.rockDark, rockiness);
-  const snow = smoothstep(42 + n * 5, 50 + n * 5, h) * smoothstep(0.55, 0.75, ny);
+  const snow = smoothstep(36 + n * 4, 43 + n * 4, h) * smoothstep(0.55, 0.75, ny);
   if (snow > 0) out.lerp(C.snow, snow);
   return out;
 }
@@ -145,5 +175,9 @@ export function buildWater(): THREE.Mesh {
   const m = new THREE.Mesh(geo, mat);
   m.position.y = WATER_Y;
   m.receiveShadow = true;
+  const pond = new THREE.Mesh(new THREE.CircleGeometry(POND.r + 0.6, 24).rotateX(-Math.PI / 2), mat);
+  pond.position.set(POND.x, POND.y, POND.z);
+  m.add(pond);
+  pond.position.y = POND.y - WATER_Y;
   return m;
 }

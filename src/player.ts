@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { Character } from './character';
+import { Character, Pose, PropKind } from './character';
 import { input } from './input';
-import { groundHeight, WATER_Y, WORLD_LIMIT } from './terrain';
+import { floorHeight, WATER_Y, WORLD_LIMIT } from './terrain';
 import { resolve } from './colliders';
 
 const SWIM_DEPTH = 1.25;   // water deeper than this → swimming
@@ -17,9 +17,30 @@ export class Player {
   grounded = true;
   swimming = false;
   speedBoost = 1;
+  jumpBoost = 1;
+  running = false;
+  /** Timed animation that locks movement (chopping, fishing, picking...). */
+  private action: { pose: Pose; t: number; done?: () => void } | null = null;
+  /** Held pose (sitting, dancing) until the player moves. */
+  private hold: Pose | null = null;
+
+  get busy() { return this.action !== null; }
+
+  doAction(pose: Pose, dur: number, prop: PropKind | null, done?: () => void) {
+    this.action = { pose, t: dur, done };
+    this.char.setProp(prop);
+  }
+  /** Sit/stand at an exact spot (bench, campfire, dock end). */
+  settle(p: THREE.Vector3, yaw: number, pose: Pose) {
+    this.pos.set(p.x, floorHeight(p.x, p.z), p.z);
+    this.heading = this.yaw = yaw;
+    this.hold = pose === 'none' ? null : pose;
+  }
+  setHold(pose: Pose | null) { this.hold = pose; }
+  get holding() { return this.hold; }
 
   constructor(scene: THREE.Scene) {
-    this.pos.y = groundHeight(this.pos.x, this.pos.z);
+    this.pos.y = floorHeight(this.pos.x, this.pos.z);
     scene.add(this.char.root);
   }
 
@@ -33,6 +54,17 @@ export class Player {
 
   update(dt: number, enabled: boolean) {
     let mx = 0, mz = 0, turn = 0;
+    let pose: Pose = 'none';
+    if (this.action) {
+      pose = this.action.pose;
+      if ((this.action.t -= dt) <= 0) {
+        const done = this.action.done;
+        this.action = null;
+        this.char.setProp(null);
+        done?.();
+      }
+      enabled = false;
+    }
     if (enabled) {
       if (input.down('KeyW')) mz += 1;
       if (input.down('KeyS')) mz -= 1;
@@ -42,8 +74,11 @@ export class Player {
       if (input.down('ArrowRight')) turn -= 1;
     }
     this.heading += turn * dt * 2.4;
+    if (mx || mz) this.hold = null;
+    else if (this.hold && pose === 'none') pose = this.hold;
 
     const running = input.down('ShiftLeft') || input.down('ShiftRight');
+    this.running = running && (mx !== 0 || mz !== 0);
     let speed = (running ? 9 * this.speedBoost : 4.5);
     if (mz < 0 && mx === 0) speed *= 0.6;
     if (this.swimming) speed *= 0.5;
@@ -59,8 +94,8 @@ export class Player {
       dx /= len; dz /= len;
       const step = speed * dt;
       const nx = this.pos.x + dx * step, nz = this.pos.z + dz * step;
-      const hNow = groundHeight(this.pos.x, this.pos.z);
-      const hNext = groundHeight(nx, nz);
+      const hNow = floorHeight(this.pos.x, this.pos.z);
+      const hNext = floorHeight(nx, nz);
       // Block steep climbs (but allow going downhill and moving while airborne over ledges)
       const tooSteep = this.grounded && !this.swimming && hNext - hNow > step * MAX_SLOPE && hNext > WATER_Y;
       if (!tooSteep) { this.pos.x = nx; this.pos.z = nz; groundSpeed = speed * (mz < 0 ? -1 : 1); }
@@ -76,14 +111,14 @@ export class Player {
       if (turn !== 0) this.yaw += d * Math.min(1, dt * 10);
     }
 
-    resolve(this.pos, 0.4);
+    if (!this.hold) resolve(this.pos, 0.4);
 
     // Stay on the island
     const r = Math.hypot(this.pos.x, this.pos.z);
     if (r > WORLD_LIMIT) { this.pos.x *= WORLD_LIMIT / r; this.pos.z *= WORLD_LIMIT / r; }
 
     // Vertical movement
-    const ground = groundHeight(this.pos.x, this.pos.z);
+    const ground = floorHeight(this.pos.x, this.pos.z);
     this.swimming = ground < WATER_Y - SWIM_DEPTH;
     const floor = this.swimming ? WATER_Y - 1.35 : ground;
 
@@ -92,7 +127,7 @@ export class Player {
       this.pos.y += (floor - this.pos.y) * Math.min(1, dt * 5);
       this.grounded = true;
     } else {
-      if (this.grounded && enabled && input.hit('Space')) { this.vy = 8; this.grounded = false; }
+      if (this.grounded && enabled && input.hit('Space')) { this.vy = 8 * this.jumpBoost; this.grounded = false; this.hold = null; }
       this.vy -= GRAVITY * dt;
       this.pos.y += this.vy * dt;
       if (this.pos.y <= floor) {
@@ -107,7 +142,7 @@ export class Player {
 
     this.char.root.position.copy(this.pos);
     this.char.root.rotation.y = this.yaw;
-    this.char.animate(dt, groundSpeed * 0.75, !this.grounded, this.swimming);
+    this.char.animate(dt, groundSpeed * 0.75, !this.grounded, this.swimming, pose);
     this.char.setGroundOffset(this.swimming ? -10 : ground - this.pos.y);
   }
 }

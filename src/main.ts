@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { input } from './input';
 import { buildTerrainMesh, buildWater, groundHeight, WORLD, terrainColor, groundNormalY } from './terrain';
-import { buildVegetation, buildVillage, findSpots, buildShards } from './world';
+import { buildVegetation, findSpots, buildShards } from './world';
+import { buildVillage } from './village';
 import { Player } from './player';
-import { NPC, makeNPCDefs, makeOutskirtsDefs, state, SHARDS_NEEDED } from './npcs';
+import { NPC, Society, makeNPCDefs } from './npcs';
+import { Animal, spawnAnimals } from './animals';
+import { state, SHARDS_NEEDED, ITEMS, Item, isNight, isFestival, addCoins } from './state';
+import { interactables, svc } from './interact';
 import { Dialogue } from './dialogue';
 import { clamp, lerp, smoothstep } from './noise';
 
@@ -61,24 +65,59 @@ scene.add(sunDisc, moonDisc);
 // ---------- World ----------
 const loading = performance.now();
 scene.add(buildTerrainMesh(), buildWater());
-buildVegetation(scene);
-const village = buildVillage(scene);
 const spots = findSpots();
+const village = buildVillage(scene, spots.shore, spots.hill);
+buildVegetation(scene, village.clearings);
 const shards = buildShards(scene, spots.shardSites.slice(0, 7));
 const player = new Player(scene);
 const labelsEl = $('labels');
-const npcs = [...makeNPCDefs(village.spots), ...makeOutskirtsDefs(spots.shore, spots.hill)].map(d => new NPC(d, scene, labelsEl));
-const pip = npcs.find(n => n.def.id === 'pip')!;
-console.log(`World built in ${(performance.now() - loading).toFixed(0)} ms`);
+const npcs = makeNPCDefs(village).map(d => new NPC(d, scene, labelsEl));
+const byId = (id: string) => npcs.find(n => n.def.id === id)!;
+const pip = byId('pip'), lotte = byId('lotte'), wren = byId('wren');
+const society = new Society(npcs);
+const VS = village.spots;
+const animals: Animal[] = spawnAnimals(scene, labelsEl, {
+  coop: VS.coop, pen: VS.pen, pigpen: VS.pigpen, pond: VS.pond, dock: VS.dockEnd, plaza: VS.plaza, farm: VS.field,
+  wild: village.wild, mittens: VS.mittens, clover: VS.clover,
+});
+const clover = animals.find(a => a.name === 'Clover')!;
+const mittens = animals.find(a => a.name === 'Mittens')!;
+console.log(`World built in ${(performance.now() - loading).toFixed(0)} ms — ${npcs.length} villagers, ${animals.length} animals, ${interactables.length} interactables`);
 
 const dialogue = new Dialogue();
 let talkingTo: NPC | null = null;
+
+// ---------- Services used by world objects ----------
+svc.dialog = (name, script, onClose) => dialogue.open(name, script, () => { onClose?.(); updateQuestLog(); });
+svc.playerAction = (pose, dur, prop, done) => player.doAction(pose, dur, prop, done);
+svc.sit = (pos, yaw, pose = 'sit') => player.settle(pos, yaw, pose);
+svc.setTime = t => { state.time = t; };
+svc.spawnFrog = at => {
+  const f = new Animal('frog', at, scene, labelsEl, { range: 8, variant: (Math.random() * 2) | 0 });
+  animals.push(f);
+  f.startFlee(player.pos, 2);
+  f.bark('RIBBIT!');
+};
+svc.ringBell = at => {
+  state.toast('DONG! DONG! DONG!');
+  society.alarm(at, ['Who rang the bell?!', 'Is it supper time?', 'Fire? FIRE?!', 'What happened?', "Somebody's ringing the bell!", 'Not again, Pip...']);
+  for (const a of animals) {
+    if (a.pos.distanceTo(at) > 30) continue;
+    if (a.kind === 'dog') a.bark('WOOF! WOOF!');
+    else if (a.kind === 'chicken' || a.kind === 'pigeon' || a.kind === 'cat') a.startFlee(at, 2.5);
+  }
+};
 
 // ---------- HUD ----------
 const toastEl = $('toast');
 let toastTimer = 0;
 state.toast = (msg: string) => { toastEl.textContent = msg; toastEl.classList.add('show'); toastTimer = 3.5; };
 state.onQuestDone = () => { village.lanternMat.emissiveIntensity = 1.6; village.lanternMat.color.set('#ffd28a'); state.toast('The lanterns of Thistlewick are lit!'); };
+let hatOn = false;
+state.changed = () => {
+  if (state.fancyHat && !hatOn) { hatOn = true; player.char.restyle({ hat: '#7a3a9a' }); }
+  updateQuestLog();
+};
 
 function updateQuestLog() {
   const lines: string[] = [];
@@ -92,7 +131,19 @@ function updateQuestLog() {
   }
   if (state.quest === 'done') lines.push('<span class="done">The Dark Lanterns</span>');
   if (state.quest === 'done' && !state.boots) lines.push('Visit Tobin at the forge.');
-  if (state.pip === 'hiding' && pip.hidden) lines.push('Find Pip — hiding somewhere outside the village.');
+  if (state.pip === 'hiding' && !pip.fled) lines.push('Find Pip — hiding somewhere outside the village.');
+  const side: string[] = [];
+  if (state.sheep === 'active') side.push(clover.follow ? 'Lead Clover to the pen east of the plaza.' : 'Find Clover the sheep, out in the hills.');
+  if (state.mittens === 'active') side.push(mittens.follow ? 'Bring Mittens back to Lotte.' : 'Find Lotte\'s cat Mittens, out past the village.');
+  if (state.pie === 'active') side.push(`Apples for Hollis: ${Math.min(3, state.inv.apples)}/3`);
+  if (state.herbs === 'active') side.push(`Mushrooms for Moss: ${Math.min(4, state.inv.mushrooms)}/4`);
+  if (state.wood === 'active') side.push(state.woodChopped >= 3 ? 'Tell Garrick the logs are chopped.' : `Chop logs for Garrick: ${state.woodChopped}/3`);
+  if (state.sock === 'active') side.push("Find Nell's red sock (north-west, past the orchard).");
+  if (state.sock === 'found') side.push('Return the sock to Nell.');
+  if (side.length) lines.push(`<small>${side.join('<br>')}</small>`);
+  const inv = (Object.keys(ITEMS) as Item[]).filter(k => state.inv[k] > 0).map(k => `${ITEMS[k].icon}${state.inv[k]}`);
+  if (state.coins) inv.unshift(`🪙${state.coins}`);
+  if (inv.length) lines.push(`<span class="inv">${inv.join('  ')}</span>`);
   $('quest').innerHTML = `<h3>Journal</h3>${lines.join('<br>')}`;
 }
 
@@ -132,9 +183,10 @@ function drawMinimap() {
     for (const s of shards) if (!s.taken) dot(s.pos.x, s.pos.z, 3.5, '#8ff0ff', '#035');
   }
   for (const n of npcs) {
-    if (n.def.id === 'pip' && state.pip === 'hiding') continue;
+    if ((n.def.id === 'pip' && state.pip === 'hiding') || n.atHome) continue;
     dot(n.pos.x, n.pos.z, 2.5, '#ffd36b', '#432');
   }
+  for (const a of [clover, mittens]) if (a.follow) dot(a.pos.x, a.pos.z, 2, '#fff', '#333');
   // Player arrow
   const px = toMap(player.pos.x), pz = toMap(player.pos.z);
   mctx.translate(px, pz);
@@ -180,8 +232,7 @@ resize();
 applyQuality(false);
 
 // ---------- Day / night ----------
-const DAY_LENGTH = 480; // seconds per full cycle
-let dayTime = 0.3;      // 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
+const DAY_LENGTH = 600; // seconds per full cycle (state.time: 0.25 = sunrise, 0.5 = noon, 0.75 = sunset)
 const C = {
   dayTop: new THREE.Color('#4f95e0'), dayBot: new THREE.Color('#cfe3f2'),
   duskTop: new THREE.Color('#3b4a7a'), duskBot: new THREE.Color('#f0a46a'),
@@ -191,8 +242,8 @@ const sunDir = new THREE.Vector3();
 const tmpTop = new THREE.Color(), tmpBot = new THREE.Color();
 
 function updateSky(dt: number) {
-  dayTime = (dayTime + dt / DAY_LENGTH * (input.down('KeyT') ? 25 : 1)) % 1;
-  const ang = (dayTime - 0.25) * Math.PI * 2;
+  state.time = (state.time + dt / DAY_LENGTH * (input.down('KeyT') ? 25 : 1)) % 1;
+  const ang = (state.time - 0.25) * Math.PI * 2;
   sunDir.set(Math.cos(ang) * 0.8, Math.sin(ang), 0.45).normalize();
   const elev = sunDir.y;
   const day = smoothstep(-0.12, 0.25, elev);
@@ -214,6 +265,8 @@ function updateSky(dt: number) {
 
   const night = 1 - day;
   village.windowMat.emissiveIntensity = night * 1.2;
+  // Lanterns flicker on for the festival once relit
+  if (state.quest === 'done' && isFestival()) village.lanternMat.emissive.setHSL(0.09 + Math.sin(performance.now() * 0.002) * 0.02, 1, 0.6);
   if (state.quest === 'done') village.lanternMat.emissiveIntensity = 0.8 + night * 1.6;
   shardMatGlow = 0.6 + night * 1.2;
   return { lightDir: moon ? sunDir.clone().negate() : sunDir };
@@ -262,20 +315,36 @@ function updateCamera(dt: number, locked: boolean) {
 
 // ---------- Interaction ----------
 const promptEl = $('prompt');
-function nearestNPC(): NPC | null {
-  let best: NPC | null = null, bestD = 3.2;
+interface Choice { label: string; act: () => void }
+function nearestInteraction(): Choice | null {
+  let best: Choice | null = null, bestScore = Infinity;
+  const fwd = player.forward;
+  const consider = (pos: THREE.Vector3, r: number, label: () => string | null, act: () => void) => {
+    const dx = pos.x - player.pos.x, dz = pos.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > r || Math.abs(pos.y - player.pos.y) > 2.5) return;
+    const facing = d > 0.05 ? (dx * fwd.x + dz * fwd.z) / d : 1;
+    const score = d - facing * 0.9;
+    if (score >= bestScore) return;
+    const l = label();
+    if (!l) return;
+    bestScore = score;
+    best = { label: l, act };
+  };
   for (const n of npcs) {
-    if (n.mode === 'flee') continue;
-    const d = Math.hypot(n.pos.x - player.pos.x, n.pos.z - player.pos.z);
-    if (d < bestD && Math.abs(n.pos.y - player.pos.y) < 2) { best = n; bestD = d; }
+    if (n.mode === 'flee' || n.atHome) continue;
+    consider(n.pos, 3.2, () => `Talk to ${n.def.name}`, () => startTalk(n));
   }
+  for (const a of animals) if (a.root.visible) consider(a.pos, 2.4, () => a.promptLabel(), () => a.interact(player.pos));
+  for (const it of interactables) consider(it.pos, it.r, it.label, it.act);
   return best;
 }
 
 function startTalk(n: NPC) {
   talkingTo = n;
+  player.setHold(null);
   player.faceToward(n.pos);
-  dialogue.open(n.def.name, n.def.script, () => {
+  dialogue.open(n.def.name, n.talkScript(), () => {
     talkingTo = null;
     if (state.pipHideRequested) {
       state.pipHideRequested = false;
@@ -297,16 +366,23 @@ function separate() {
 
 // ---------- Labels ----------
 const proj = new THREE.Vector3();
+function placeLabel(el: HTMLElement, p: THREE.Vector3, hgt: number, maxD: number, hide: boolean) {
+  const d = camera.position.distanceTo(p);
+  if (hide || d > maxD) { if (el.style.display !== 'none') el.style.display = 'none'; return; }
+  proj.set(p.x, p.y + hgt, p.z).project(camera);
+  if (proj.z > 1) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.style.opacity = String(clamp((maxD - d) / 8, 0, 1));
+  el.style.transform = `translate(${((proj.x + 1) / 2) * window.innerWidth}px, ${((1 - proj.y) / 2) * window.innerHeight}px) translate(-50%, -100%)`;
+}
 function updateLabels() {
-  const w = window.innerWidth, h = window.innerHeight;
   for (const n of npcs) {
-    const d = camera.position.distanceTo(n.pos);
-    const hiddenPip = n === pip && state.pip === 'hiding' && d > 12;
-    proj.set(n.pos.x, n.pos.y + 2.35 * (n.def.style.scale ?? 1), n.pos.z).project(camera);
-    if (d > 28 || proj.z > 1 || hiddenPip || (talkingTo === n)) { n.label.style.display = 'none'; continue; }
-    n.label.style.display = '';
-    n.label.style.opacity = String(clamp((28 - d) / 8, 0, 1));
-    n.label.style.transform = `translate(${((proj.x + 1) / 2) * w}px, ${((1 - proj.y) / 2) * h}px) translate(-50%, -100%)`;
+    const hiddenPip = n === pip && state.pip === 'hiding' && camera.position.distanceTo(n.pos) > 12;
+    placeLabel(n.label, n.pos, 2.35 * (n.def.style.scale ?? 1), 28, hiddenPip || talkingTo === n || n.atHome);
+  }
+  for (const a of animals) {
+    const show = a.root.visible && (a.label.classList.contains('barking') || (a.name !== undefined && camera.position.distanceTo(a.pos) < 14));
+    placeLabel(a.label, a.pos, a.labelH, 22, !show);
   }
 }
 
@@ -343,26 +419,63 @@ function frame(now: number) {
     const inDialogue = dialogue.active;
     if (inDialogue) dialogue.update(dt);
 
+    state.clock += dt;
     player.speedBoost = state.boots ? 1.35 : 1;
+    player.jumpBoost = state.tonic ? 1.45 : 1;
+    if (input.hit('KeyG') && !inDialogue && !player.busy) {
+      if (state.canDance) {
+        player.setHold(player.holding === 'dance' ? null : 'dance');
+        if (player.holding === 'dance') for (const n of npcs) if (n.pos.distanceTo(player.pos) < 8 && n.mode === 'task') n.bark(['Nice moves!', 'Ha! Look at you go!', 'Is that... dancing?', 'Wooo!'][(Math.random() * 4) | 0], 2.5);
+      } else state.toast('You wiggle awkwardly. Someone should teach you to dance.');
+    }
     player.update(dt, !inDialogue);
-    for (const n of npcs) n.update(dt, player.pos, talkingTo === n);
+
+    // Festival evenings and bard performances
+    if (isFestival() && (!state.party || state.party.until < state.clock + 1)) state.party = { x: VS.bard.x, z: VS.bard.z, until: state.clock + 2 };
+    if (state.party && state.party.until < state.clock) state.party = null;
+
+    for (const n of npcs) {
+      n.update(dt, player.pos, talkingTo === n);
+      n.char.root.visible = !n.atHome && n.pos.distanceTo(player.pos) < 150;
+    }
+    society.update(dt, animals, player.pos);
+    const aw = { player: player.pos, running: player.running, animals, villagers: npcs, night: isNight() };
+    for (const a of animals) {
+      const near = a.pos.distanceTo(player.pos) < (a.small ? 55 : 90) || a.follow !== null;
+      a.root.visible = near;
+      if (near) a.update(dt, aw);
+    }
     separate();
 
+    // Lost animals finding their way home
+    if (clover.follow && clover.pos.distanceTo(VS.pen) < 12) {
+      clover.follow = null; clover.lost = false; clover.home.copy(VS.pen); clover.range = 4.5;
+      if (state.sheep !== 'done') { state.sheep = 'done'; addCoins(8); state.toast('Clover is home! Wren pays you 8 coins 🪙'); wren.bark('CLOVER! Oh, you silly thing!', 4); }
+      updateQuestLog();
+    }
+    if (mittens.follow && mittens.pos.distanceTo(lotte.pos) < 4) {
+      mittens.follow = null; mittens.lost = false; mittens.home.copy(VS.plaza); mittens.range = 14;
+      if (state.mittens !== 'done') { state.mittens = 'done'; state.canDance = true; state.toast('Mittens is home! Lotte teaches you a dance — press G'); lotte.bark('MITTENS!!! You found her!', 4); }
+      updateQuestLog();
+    }
+
     // Pip vanishes to a hiding spot once he's out of sight
-    if (state.pip === 'hiding' && pip.hidden && pip.mode !== 'flee') {
-      pip.hidden = false;
-      const spot = spots.hideSpots[(Math.random() * spots.hideSpots.length) | 0];
+    if (state.pip === 'hiding' && pip.fled && pip.mode !== 'flee') {
+      pip.fled = false;
+      const spot = village.hideSpots[(Math.random() * village.hideSpots.length) | 0];
       pip.teleport(spot);
       updateQuestLog();
     }
-    if (state.pip === 'found' && pip.pos.distanceTo(player.pos) > 60) pip.teleport(pip.def.home);
+    if (state.pip === 'found' && pip.pos.distanceTo(player.pos) > 60 && pip.pos.length() > 40) pip.teleport(pip.def.home);
+
+    village.update(dt);
 
     // Interaction prompt
-    const near = !inDialogue ? nearestNPC() : null;
+    const near = !inDialogue && !player.busy ? nearestInteraction() as Choice | null : null;
     if (near) {
-      promptEl.innerHTML = `<kbd>E</kbd> Talk to ${near.def.name}`;
+      promptEl.innerHTML = `<kbd>E</kbd> ${near.label}`;
       promptEl.style.display = 'block';
-      if (input.hit('KeyE')) startTalk(near);
+      if (input.hit('KeyE')) near.act();
     } else promptEl.style.display = 'none';
 
     // Shards
@@ -421,4 +534,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Handy for debugging from the browser console.
-(window as unknown as Record<string, unknown>).game = { player, npcs, shards, state, setTime: (t: number) => { dayTime = t; } };
+(window as unknown as Record<string, unknown>).game = { player, npcs, animals, shards, state, village, setTime: (t: number) => { state.time = t; } };
