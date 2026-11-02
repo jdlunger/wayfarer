@@ -8,6 +8,10 @@ npm run dev      # http://localhost:5173
 npm run build    # static files in dist/ — host anywhere
 ```
 
+## Deployment
+Pushes to `main` build and deploy to GitHub Pages via `.github/workflows/deploy.yml`
+(one-time setup: repo **Settings → Pages → Source: GitHub Actions**).
+
 ## Controls
 W/S walk · A/D strafe · ←/→ turn · ↑/↓ tilt camera · Shift run · Space jump · E talk ·
 1–4 / ↑↓ Enter pick dialogue · C camera distance · T (hold) fast-forward time · Q quality · F fps · H help
