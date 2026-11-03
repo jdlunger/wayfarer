@@ -204,7 +204,7 @@ export class Chaos {
 
     this.tintAmt += (this.tintWant - this.tintAmt) * Math.min(1, dt * 1.5);
     this.flash *= Math.exp(-dt * 9);
-    this.shake *= Math.exp(-dt * 3);
+    this.shake *= Math.exp(-dt * 4);
   }
 
   /** Start a random (or named) event. */
@@ -228,10 +228,16 @@ export class Chaos {
 
   // ---------- Hooks for main.ts ----------
   applyCamera(camera: THREE.PerspectiveCamera) {
-    const s = Math.min(this.shake, 2.5);
-    this.shakeOff.set((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s).multiplyScalar(0.6);
+    // Smooth, low-frequency wobble (layered sines) instead of per-frame random jitter,
+    // with a softened amplitude curve so big events rumble rather than rattle.
+    const raw = Math.min(this.shake, 2.5);
+    if (raw < 0.01) return;
+    const s = raw * raw / (raw + 0.6) * 0.18;
+    const t = performance.now() * 0.001;
+    const n = (a: number, b: number) => Math.sin(t * a) * 0.6 + Math.sin(t * b + 1.7) * 0.4;
+    this.shakeOff.set(n(17, 29), n(19, 31) * 0.7, n(23, 13)).multiplyScalar(s);
     camera.position.add(this.shakeOff);
-    camera.rotation.z += (Math.random() - 0.5) * s * 0.03;
+    camera.rotation.z += n(11, 7) * s * 0.025;
   }
 
   applySky(top: THREE.Color, bottom: THREE.Color, fog: THREE.Color, bg: THREE.Color, hemi: THREE.HemisphereLight) {
