@@ -5,6 +5,7 @@ import { resolve } from './colliders';
 import { state, take, Item, ITEMS } from './state';
 import { svc } from './interact';
 import { sfx, SoundName } from './audio';
+import { animalQuip } from './quips';
 
 const { BOX } = SHAPES;
 
@@ -398,7 +399,7 @@ export class Animal {
 
   bark(text?: string) {
     const s = this.spec.sounds;
-    this.bubble.textContent = text ?? s[(Math.random() * s.length) | 0];
+    this.bubble.textContent = text ?? (Math.random() < 0.35 ? animalQuip(this.kind, s) : s[(Math.random() * s.length) | 0]);
     this.label.classList.add('barking');
     if (this.kind !== 'deer' && this.kind !== 'rabbit' && this.kind !== 'horse') sfx.play(VOICE[this.kind], this.pos, { range: 50, gap: 0.12, vol: this.kind === 'cow' ? 0.8 : 0.6 });
     this.barkTimer = 2.4;
@@ -503,6 +504,7 @@ export class Animal {
     if (this.barkTimer > 0 && (this.barkTimer -= dt) <= 0) this.label.classList.remove('barking');
     this.barkCd -= dt;
     if (this.puppet) return;
+    if (!this.air && this.barkCd <= 0 && this.barkTimer <= 0 && flat(this.pos, w.player) < 22 && Math.random() < dt * 0.04) { this.bark(animalQuip(this.kind, this.spec.sounds)); this.barkTimer = 3.4; }
     if (this.air) return this.updateAir(dt);
     if (this.spec.fly) return this.updateFly(dt, w);
 

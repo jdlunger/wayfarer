@@ -7,6 +7,7 @@ import { state, SHARDS_NEEDED, take, addCoins, ITEMS, Item, isNight, isFestival 
 import type { Animal, Villager } from './animals';
 import type { Village } from './village';
 import { sfx } from './audio';
+import { villagerQuip } from './quips';
 
 export { state, SHARDS_NEEDED };
 
@@ -113,7 +114,7 @@ export class NPC implements Villager {
 
   bark(text?: string, dur = 3.5) {
     const lines = this.def.barks;
-    this.bubble.textContent = text ?? lines[(Math.random() * lines.length) | 0];
+    this.bubble.textContent = text ?? (Math.random() < 0.4 ? villagerQuip(this.def.id) : lines[(Math.random() * lines.length) | 0]);
     this.label.classList.add('barking');
     this.barkTimer = dur;
     this.barkCooldown = 20 + Math.random() * 20;
@@ -248,6 +249,8 @@ export class NPC implements Villager {
     this.chatCd -= dt;
     this.tagCd -= dt;
     this.deflectT -= dt;
+    // Mutter something odd now and then.
+    if (this.mode === 'task' && this.barkCooldown <= 0 && this.barkTimer <= 0 && toPlayer < 28 && Math.random() < dt * 0.05) this.bark(villagerQuip(this.def.id), 3.5);
 
     // Night: go indoors / come back out in the morning.
     if (this.atHome) {
