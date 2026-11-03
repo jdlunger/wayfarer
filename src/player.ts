@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { Character, Pose, PropKind } from './character';
+import { Character, Pose, PropKind, placeTumbling } from './character';
 import { input } from './input';
 import { floorHeight, WATER_Y, WORLD_LIMIT } from './terrain';
 import { resolve } from './colliders';
 import { state } from './state';
+import { sfx } from './audio';
 
 const SWIM_DEPTH = 1.25;   // water deeper than this → swimming
 const GRAVITY = 24;
@@ -28,6 +29,7 @@ export class Player {
   /** Knockback velocity from explosions, tornadoes, stampedes... */
   private push = new THREE.Vector3();
   private tumble = 0;
+  private spin = 0;
 
   get busy() { return this.action !== null; }
   get airborne() { return !this.grounded; }
@@ -154,6 +156,7 @@ export class Player {
       this.vy -= GRAVITY * state.gravity * dt;
       this.pos.y += this.vy * dt;
       if (this.pos.y <= floor) {
+        if (this.vy < -9) sfx.play('thud', null, { vol: Math.min(1, -this.vy / 25) });
         this.pos.y = floor; this.vy = 0; this.grounded = true;
       } else if (this.grounded && this.pos.y - floor < 0.6 && this.vy <= 0) {
         // Snap down small steps when walking downhill
@@ -165,8 +168,10 @@ export class Player {
 
     this.char.root.position.copy(this.pos);
     this.char.root.rotation.y = this.yaw;
-    if (this.tumble > 0 && !this.grounded) this.char.root.rotation.x += dt * 9;
-    else if (this.grounded) { this.tumble = 0; this.char.root.rotation.x = 0; }
+    if (this.tumble > 0 && !this.grounded) {
+      this.spin += dt * 9;
+      placeTumbling(this.char.root, this.pos, this.yaw, this.spin, this.spin * 0.3, 0.95);
+    } else if (this.grounded) { this.tumble = 0; this.spin = 0; this.char.root.rotation.set(0, this.yaw, 0); }
     this.char.animate(dt, groundSpeed * 0.75, !this.grounded, this.swimming, pose);
     this.char.setGroundOffset(this.swimming ? -10 : ground - this.pos.y);
   }

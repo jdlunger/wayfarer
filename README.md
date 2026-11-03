@@ -14,7 +14,7 @@ Pushes to `main` build and deploy to GitHub Pages via `.github/workflows/deploy.
 
 ## Controls
 W/S walk · A/D strafe · ←/→ turn · ↑/↓ tilt camera · Shift run · Space jump · E talk / interact ·
-G dance (once learned) · 1–4 / ↑↓ Enter pick dialogue · C camera distance · T (hold) fast-forward time · Q quality · F fps · H help
+G dance (once learned) · 1–4 / ↑↓ Enter pick dialogue · C camera distance · T (hold) fast-forward time · X summon chaos · M mute · Q quality · F fps · H help
 
 ## What's on the island
 A compact island with the village of Thistlewick at its heart: plaza, well, bell, notice board, market stall,
@@ -31,6 +31,14 @@ campfire, plus a dock, an herbalist's hut in the woods and a hermit's camp on th
   campfire (skip time), chopping stump, fishing off the dock, signposts, the scarecrow...
 - **Side quests**: lost sheep, lost cat, apples for the baker, mushrooms for the herbalist, firewood, a runaway sock;
   sell goods to Ilsa and spend coins on a fishing rod or a very fancy hat.
+- **A steam railway** loops around the village: two trains, four stations (Harbour Halt, Thistlewick Gate,
+  Campfire Crossing, Pasture Junction), passengers getting on and off, porters moving cargo between the flatcar and
+  the platform. Anything standing on the line gets a warning toot and then goes flying.
+- **Chaos**: roughly every 30 seconds (sometimes two back to back) the world loses its mind — meteor showers,
+  pirate bombardments, tornadoes, frog rain, stampedes, UFO abductions, earthquakes, thunderstorms, giant vengeful
+  chickens, spontaneous disco, zero gravity, geysers, blood moons and misfiring fireworks.
+- **Sound** is synthesised live with the Web Audio API (no audio files, nothing to license). To use recorded clips
+  instead, drop them in `public/sfx/` and list them in `SAMPLES` in `src/audio.ts`, e.g. `{ boom: 'sfx/boom.ogg' }`.
 
 ## Layout
 - `src/terrain.ts` — seeded heightmap island (simplex fbm + ridged mountains), village plateau + pond, vertex-coloured mesh, exact ground-height sampling
@@ -44,6 +52,9 @@ campfire, plus a dock, an herbalist's hut in the woods and a hermit's camp on th
 - `src/player.ts` — movement, slopes, jumping, swimming, sitting/actions
 - `src/npcs.ts` — villager schedules/tasks, social behaviour (chats, tag, reactions), dialogue trees
 - `src/dialogue.ts` — keyboard dialogue UI
+- `src/chaos.ts` — the chaos director: world events, particles, knockback
+- `src/railway.ts` — track, stations, trains, passengers and cargo
+- `src/audio.ts` — synthesised, spatialised sound effects and loops
 - `src/main.ts` — renderer, day/night, camera, HUD, minimap, quality + adaptive resolution
 
 ## Performance choices

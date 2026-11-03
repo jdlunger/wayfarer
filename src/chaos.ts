@@ -4,6 +4,7 @@ import { state } from './state';
 import { Animal, AnimalKind } from './animals';
 import type { NPC } from './npcs';
 import type { Player } from './player';
+import { sfx } from './audio';
 
 /**
  * The Chaos Director: a constant stream of world events — meteors, tornadoes,
@@ -127,7 +128,10 @@ export class Chaos {
   private fires: Fire[] = [];
   private light = new THREE.PointLight('#ff8a3a', 0, 60, 1);
   private running: Running[] = [];
-  private cooldown = 6;
+  /** Seconds until the next event (first one comes a little sooner). */
+  private cooldown = 20;
+  /** Pending quick follow-up event. */
+  private double = -1;
   private lastIds: string[] = [];
   private bannerEl = document.getElementById('chaos')!;
   private bannerT = 0;
@@ -158,10 +162,13 @@ export class Chaos {
   // ---------- Director ----------
   update(dt: number) {
     this.cooldown -= dt;
-    if (this.cooldown <= 0 && this.running.length < 3) {
+    // Roughly every 30 s; one time in four a second event piles on a few seconds later.
+    if (this.cooldown <= 0) {
+      this.cooldown = rnd(27, 33);
       this.trigger();
-      if (Math.random() < 0.25 && this.running.length < 3) this.trigger();
+      if (Math.random() < 0.25) this.double = rnd(3, 6);
     }
+    if (this.double > 0 && (this.double -= dt) <= 0) { this.double = -1; this.trigger(); }
     for (const r of [...this.running]) {
       r.t += dt;
       r.tick(dt, r.t);
@@ -207,12 +214,12 @@ export class Chaos {
     Object.assign(run, def.start.call(this, run));
     this.running.push(run);
     this.lastIds = [def.id, ...this.lastIds].slice(0, 4);
-    this.cooldown = rnd(5, 11);
     this.count++;
     this.banner(def.title, def.sub);
   }
 
   banner(title: string, sub: string) {
+    sfx.play('sting', null, { vol: 0.8 });
     this.bannerEl.innerHTML = `<b>${title}</b><small>${sub}</small>`;
     this.bannerEl.classList.remove('show');
     void this.bannerEl.offsetWidth;
@@ -262,8 +269,8 @@ export class Chaos {
   }
 
   private launch(b: Body, v: THREE.Vector3) {
-    if (b.kind === 'player') this.w.player.launch(v);
-    else if (b.kind === 'npc') b.n.launch(v);
+    if (b.kind === 'player') { if (!this.w.player.airborne) sfx.play('boing', null, { gap: 0.2 }); this.w.player.launch(v); }
+    else if (b.kind === 'npc') { if (!b.n.air && v.y > 6) sfx.play('scream', b.n.pos, { range: 60, gap: 0.25 }); b.n.launch(v); }
     else b.a.launch(v);
   }
 
@@ -295,6 +302,7 @@ export class Chaos {
   explode(at: THREE.Vector3, r: number, power: number, opts: { ember?: boolean; colors?: string[] } = {}) {
     const wet = groundHeight(at.x, at.z) < WATER_Y;
     const pos = at.clone();
+    sfx.play(wet ? 'splash' : r >= 7 ? 'bigBoom' : 'boom', pos, { range: 220, vol: wet ? 1 : 0.9 });
     this.fx.burst(pos, 50 + r * 10, power * 1.4, wet ? WATERC : opts.colors ?? FIRE, 0.45, 1.0, 0.6, power * 0.4);
     this.fx.burst(pos, 25 + r * 4, power * 0.6, wet ? WATERC : SMOKE, 0.9, 2.2, -0.05, 2);
     if (!wet) this.fx.burst(pos, 30, power, DIRT, 0.25, 1.6, 1, power * 0.7);
@@ -346,6 +354,9 @@ export class Chaos {
     mesh.position.copy(from);
     mesh.castShadow = true;
     this.w.scene.add(mesh);
+    if (o.firework) sfx.play('rocket', from, { range: 80, gap: 0.05 });
+    else if (mat === cannonMat) sfx.play('cannon', from, { range: 600, vol: 0.5, gap: 0.1 });
+    else sfx.play('meteor', from.clone().lerp(this.p, 0.7), { range: 150, gap: 0.15 });
     this.projectiles.push({ mesh, v, trail: FIRE, power: 12, radius: 6, ember: false, grav: 0, ...o });
   }
 
@@ -366,6 +377,7 @@ export class Chaos {
       if (pr.firework && m.position.y > floor + 2) {
         this.fx.burst(m.position, 160, 16, [pick(CONFETTI), pick(CONFETTI), '#ffffff'], 0.35, 1.8, 0.15);
         this.light.position.copy(m.position); this.light.intensity = 25;
+        sfx.play('pop', m.position, { range: 150 });
         this.shake = Math.max(this.shake, 0.2);
       } else this.explode(m.position.clone().setY(floor + 0.3), pr.radius, pr.power, { ember: pr.ember, colors: pr.firework ? CONFETTI : undefined });
     }
@@ -418,6 +430,7 @@ export class Chaos {
       x = nx; y = ny; z = nz;
     }
     this.boltT = 0.18;
+    sfx.play('thunder', at, { range: 400 });
     this.flash = Math.max(this.flash, 0.85);
     this.explode(at.clone().setY(at.y + 0.3), 4.5, 11, { ember: true, colors: ['#ffffff', '#cfe8ff', '#ffe066', '#9fd0ff'] });
     this.addFire(at);
@@ -512,6 +525,7 @@ const EVENTS: EventDef[] = [
       const vel = V();
       let t = 0;
       this.setTint('#59606a', 0.5);
+      const wind = sfx.loop('wind', pos, { range: 120, vol: 1.2 });
       this.panic(pos, 80, ['TORNADO!', 'To the cellar!', 'We have a cellar?', 'Grab the cows!', 'Hold on to something!']);
       return {
         tick: (dt: number, el: number) => {
@@ -528,6 +542,7 @@ const EVENTS: EventDef[] = [
           const grow = Math.min(1, el / 2, (this._runLeft(el, 'tornado')) / 2);
           g.position.copy(pos);
           g.scale.setScalar(Math.max(0.01, grow));
+          wind.setPos(pos); wind.setVolume(1.2 * grow);
           rings.forEach((m, i) => {
             m.rotation.z += dt * (6 - i * 0.2);
             m.position.x = Math.sin(t * 2 + i * 0.4) * i * 0.25;
@@ -556,7 +571,7 @@ const EVENTS: EventDef[] = [
             }
           });
         },
-        end: () => { w.scene.remove(g); rings.forEach(r => r.geometry.dispose()); mat.dispose(); this.clearTint(); },
+        end: () => { wind.stop(); w.scene.remove(g); rings.forEach(r => r.geometry.dispose()); mat.dispose(); this.clearTint(); },
       };
     },
   },
@@ -599,6 +614,7 @@ const EVENTS: EventDef[] = [
         herd.push({ a, sp: rnd(9, 13), off });
       }
       this.shake = 0.3;
+      const rumble = sfx.loop('rumble', herd[0].a.pos, { range: 120, vol: 1.3 });
       return {
         tick: (dt: number) => {
           const yaw = Math.atan2(dir.x, dir.z);
@@ -617,12 +633,15 @@ const EVENTS: EventDef[] = [
             this._bodies(a.pos, 1.7, (b) => {
               if (b.kind === 'animal' && herd.some(x => x.a === b.a)) return;
               this._launch(b, dir.clone().multiplyScalar(rnd(12, 18)).add(side.clone().multiplyScalar(rnd(-4, 4))).setY(rnd(9, 14)));
+              sfx.play('thud', this._posOf(b), { range: 60 });
               if (b.kind === 'npc') b.n.bark(pick(['MOOOO— OOF!', 'Not the cows!', 'Run over by a sheep. Typical.']), 2.5);
             });
           }
           this.shake = Math.max(this.shake, Math.max(0, 0.8 - close / 40));
+          const lead = herd.find(h => h.a.puppet);
+          if (lead) rumble.setPos(lead.a.pos);
         },
-        end: () => herd.forEach(h => this._despawn(h.a)),
+        end: () => { rumble.stop(); herd.forEach(h => this._despawn(h.a)); },
       };
     },
   },
@@ -650,6 +669,7 @@ const EVENTS: EventDef[] = [
       beam.visible = false;
       g.add(beam);
       w.scene.add(g);
+      const hum = sfx.loop('hum', g.position, { range: 160, vol: 1 });
 
       // Choose who gets abducted: usually a cow or a villager, sometimes YOU.
       let victim: Body | null = null;
@@ -669,6 +689,7 @@ const EVENTS: EventDef[] = [
           t += dt;
           lights.forEach((l, i) => (l.material as THREE.MeshBasicMaterial).color.setHSL((t * 0.8 + i / 12) % 1, 1, 0.6));
           rim.rotation.y += dt * 4;
+          hum.setPos(g.position);
           const above = V(vpos.x, Math.max(floorHeight(vpos.x, vpos.z), 0) + 16, vpos.z);
           if (phase === 'arrive') {
             g.position.lerp(above, Math.min(1, dt * 1.4));
@@ -676,6 +697,7 @@ const EVENTS: EventDef[] = [
             if (g.position.distanceTo(above) < 1.5) {
               phase = 'beam';
               beam.visible = true;
+              sfx.play('zap', g.position, { range: 120 });
               this.panic(vpos, 40, ['ALIENS!', 'THE SKY PEOPLE!', `They're taking ${vName}!`, 'Take Brann instead!', 'I knew Sela was right!']);
               if (victim!.kind === 'npc') { victim!.n.puppet = true; victim!.n.bark('Um. Hello? Put me down?', 4); }
               if (victim!.kind === 'animal') { victim!.a.puppet = true; victim!.a.bark(); }
@@ -695,7 +717,7 @@ const EVENTS: EventDef[] = [
               vp.x += (g.position.x - vp.x) * Math.min(1, dt * 3);
               vp.z += (g.position.z - vp.z) * Math.min(1, dt * 3);
               vp.y += dt * 3;
-              if (victim!.kind === 'animal') { const a = victim!.a; a.root.position.copy(vp); a.root.rotation.y += dt * 4; a.parts.model.rotation.z += dt * 2; }
+              if (victim!.kind === 'animal') { const a = victim!.a; a.root.position.copy(vp); a.yaw += dt * 4; a.root.rotation.set(0, a.yaw, 0); }
               if (vp.y > g.position.y - 1) { phase = 'leave'; if (victim!.kind === 'animal') victim!.a.root.visible = false; else victim!.n.char.root.scale.setScalar(0.001); }
             }
             for (let k = 0; k < 4; k++) this._fx.emit(g.position.x + rnd(-3, 3), g.position.y - rnd(0, H), g.position.z + rnd(-3, 3), 0, rnd(3, 6), 0, rnd(0.5, 1), 0.15, pick(['#7dff9a', '#c8ffd4', '#ffffff']), 0, 0.5);
@@ -706,6 +728,7 @@ const EVENTS: EventDef[] = [
           }
         },
         end: () => {
+          hum.stop();
           w.scene.remove(g);
           // Return the victim, unceremoniously, from a great height.
           if (victim && victim.kind !== 'player') {
@@ -713,7 +736,7 @@ const EVENTS: EventDef[] = [
             vp.set(home.x + rnd(-3, 3), home.y + 30, home.z + rnd(-3, 3));
             const v = V(0, -2, 0);
             if (victim.kind === 'animal') { const a = victim.a; a.puppet = false; a.root.visible = true; a.launch(v); setTimeout(() => a.bark(pick(['Moo...?', '*vacant stare*', '...', '*thousand-yard stare*'])), 2500); }
-            else { const n = victim.n; n.puppet = false; n.char.root.scale.setScalar(1); n.char.root.rotation.set(0, 0, 0); n.launch(v); setTimeout(() => n.bark(pick(["I've seen things.", 'They were very polite.', 'They probed my cheese.', 'I am different now.']), 4), 2500); }
+            else { const n = victim.n; n.puppet = false; n.char.root.scale.setScalar(1); n.char.root.rotation.set(0, n.yaw, 0); n.launch(v); setTimeout(() => n.bark(pick(["I've seen things.", 'They were very polite.', 'They probed my cheese.', 'I am different now.']), 4), 2500); }
             state.toast(`${vName[0].toUpperCase() + vName.slice(1)} falls out of the sky!`);
           }
         },
@@ -725,6 +748,7 @@ const EVENTS: EventDef[] = [
     start(this: C) {
       let next = 0, hop = 0.6;
       this.panic(this.p, 90);
+      const rumble = sfx.loop('rumble', null, { vol: 2 });
       return {
         tick: (dt: number) => {
           this.shake = Math.max(this.shake, 1.3);
@@ -736,6 +760,7 @@ const EVENTS: EventDef[] = [
           const s = this._spot(0, 25);
           this._fx.burst(s, 10, 4, DIRT, 0.4, 1, 1, 3);
         },
+        end: () => rumble.stop(),
       };
     },
   },
@@ -744,6 +769,7 @@ const EVENTS: EventDef[] = [
     start(this: C) {
       let next = 1.2;
       this.setTint('#1a2240', 0.7);
+      const rain = sfx.loop('rain', null, { vol: 0.35 });
       return {
         tick: (dt: number) => {
           if ((next -= dt) > 0) return;
@@ -755,7 +781,7 @@ const EVENTS: EventDef[] = [
           else at = this._spot(3, 45);
           this.strike(at);
         },
-        end: () => this.clearTint(),
+        end: () => { rain.stop(); this.clearTint(); },
       };
     },
   },
@@ -796,6 +822,7 @@ const EVENTS: EventDef[] = [
     id: 'disco', title: '🪩 SPONTANEOUS DISCO', sub: 'Nobody knows where the music is coming from.', w: 2, dur: [16, 22],
     start(this: C) {
       this.setDisco(true);
+      const music = sfx.loop('disco', null, { vol: 0.9 });
       let next = 0, boom = 0;
       return {
         tick: (dt: number) => {
@@ -813,7 +840,7 @@ const EVENTS: EventDef[] = [
           }
           this._bodies(this.p, 35, b => { if (b.kind === 'animal' && Math.random() < 0.25) b.a.launch(V(0, rnd(3, 6), 0)); });
         },
-        end: () => { this.setDisco(false); state.party = null; },
+        end: () => { music.stop(); this.setDisco(false); state.party = null; },
       };
     },
   },
@@ -821,6 +848,8 @@ const EVENTS: EventDef[] = [
     id: 'gravity', title: '🌌 GRAVITY HAS STOPPED WORKING', sub: 'Please remain calm and do not drift into space.', w: 2, dur: [12, 16],
     start(this: C) {
       state.gravity = 0.08;
+      sfx.play('zap', null, { vol: 0.6 });
+      const hum = sfx.loop('hum', null, { vol: 0.35 });
       this.setTint('#6a4aa8', 0.35);
       this._bodies(this.p, 70, b => this._launch(b, V(rnd(-1, 1), rnd(3, 7), rnd(-1, 1))));
       return {
@@ -828,7 +857,7 @@ const EVENTS: EventDef[] = [
           if (Math.random() < 0.02) { const v = this._victim(60); if (v) this._launch(v, V(rnd(-1, 1), rnd(3, 6), rnd(-1, 1))); }
           if (t > 2 && Math.random() < 0.01) this._w.npcs.find(n => n.air && Math.random() < 0.3)?.bark(pick(['I\'m floating!', 'Wheeee!', 'I can see my house!', 'How do I get DOWN?', 'This is the best day of my life.']), 3);
         },
-        end: () => { state.gravity = 1; this.clearTint(); state.toast('Gravity is back. Brace for landing.'); },
+        end: () => { hum.stop(); state.gravity = 1; this.clearTint(); state.toast('Gravity is back. Brace for landing.'); },
       };
     },
   },
@@ -836,15 +865,19 @@ const EVENTS: EventDef[] = [
     id: 'geysers', title: '💦 GEYSERS!', sub: 'The ground is very, very angry.', w: 2, dur: [14, 18],
     start(this: C) {
       const gs: { p: THREE.Vector3; warn: number; blow: number }[] = [];
+      const hiss = sfx.loop('hiss', null, { vol: 0 });
       for (let i = 0; i < 9; i++) gs.push({ p: i === 0 ? this._spot(0, 3) : this._spot(3, 28), warn: rnd(1, 9), blow: rnd(2.5, 4) });
       return {
         tick: (dt: number) => {
+          let near = 99;
+          for (const g of gs) if (g.warn <= 0 && g.blow > 0) near = Math.min(near, flat(g.p, this.p));
+          hiss.setVolume(Math.max(0, 0.6 - near / 60));
           for (const g of gs) {
             const p = g.p;
             if (g.warn > 0) {
               g.warn -= dt;
               if (Math.random() < 0.6) this._fx.emit(p.x + rnd(-1, 1), p.y + 0.1, p.z + rnd(-1, 1), 0, rnd(1, 3), 0, 0.5, 0.25, pick(WATERC), 0.5, 1);
-              if (g.warn <= 0) { this.shake = Math.max(this.shake, Math.max(0, 1 - flat(p, this.p) / 30)); this.panic(p, 15, ['Is the ground... gurgling?', 'WATER!', 'Sploosh!']); }
+              if (g.warn <= 0) { sfx.play('splash', p, { range: 90, vol: 1.2 }); this.shake = Math.max(this.shake, Math.max(0, 1 - flat(p, this.p) / 30)); this.panic(p, 15, ['Is the ground... gurgling?', 'WATER!', 'Sploosh!']); }
             } else if (g.blow > 0) {
               g.blow -= dt;
               for (let k = 0; k < 10; k++) this._fx.emit(p.x + rnd(-0.6, 0.6), p.y, p.z + rnd(-0.6, 0.6), rnd(-1.5, 1.5), rnd(25, 38), rnd(-1.5, 1.5), rnd(1, 1.6), rnd(0.3, 0.6), pick(WATERC), 1, 0.2);
@@ -852,6 +885,7 @@ const EVENTS: EventDef[] = [
             }
           }
         },
+        end: () => hiss.stop(),
       };
     },
   },

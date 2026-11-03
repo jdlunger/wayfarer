@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { Character, CharStyle, Pose, PropKind } from './character';
+import { Character, CharStyle, Pose, PropKind, placeTumbling } from './character';
 import { DScript, DOption } from './dialogue';
 import { floorHeight, isWet, WORLD_LIMIT } from './terrain';
 import { resolve } from './colliders';
 import { state, SHARDS_NEEDED, take, addCoins, ITEMS, Item, isNight, isFestival } from './state';
 import type { Animal, Villager } from './animals';
 import type { Village } from './village';
+import { sfx } from './audio';
 
 export { state, SHARDS_NEEDED };
 
@@ -80,9 +81,10 @@ export class NPC implements Villager {
   /** Indoors for the night. */
   atHome = false;
   /** Flying through the air after an explosion/tornado/etc. */
-  air: { v: THREE.Vector3; spin: number } | null = null;
+  air: { v: THREE.Vector3; spin: number; rx: number; rz: number } | null = null;
   /** Position is driven externally (e.g. by a tractor beam). */
   puppet = false;
+  private puppetSpin = 0;
   readonly label: HTMLDivElement;
   private bubble: HTMLDivElement;
 
@@ -133,7 +135,7 @@ export class NPC implements Villager {
     this.react = null;
     if (this.mode === 'react') this.mode = 'task';
     if (this.air) { this.air.v.add(v); return; }
-    this.air = { v: v.clone(), spin: (Math.random() - 0.5) * 16 };
+    this.air = { v: v.clone(), spin: (Math.random() - 0.5) * 16, rx: 0, rz: 0 };
     this.pos.y += 0.05;
   }
 
@@ -149,14 +151,17 @@ export class NPC implements Villager {
     if (this.pos.y <= floor && a.v.y <= 0) {
       this.pos.y = floor;
       this.air = null;
-      root.rotation.x = root.rotation.z = 0;
+      sfx.play('thud', this.pos, { range: 50 });
+      root.rotation.set(0, this.yaw, 0);
       this.mode = 'task'; this.phase = 'go'; this.task = null;
       this.startReact('scared', 1.6, this.pos.clone().add(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)), LANDINGS[(Math.random() * LANDINGS.length) | 0]);
     } else {
-      root.rotation.x += a.spin * dt;
-      root.rotation.z += a.spin * 0.4 * dt;
+      a.rx += a.spin * dt;
+      a.rz += a.spin * 0.4 * dt;
     }
-    root.position.copy(this.pos);
+    const cy = 0.95 * (this.def.style.scale ?? 1);
+    if (this.air) placeTumbling(root, this.pos, this.yaw, a.rx, a.rz, cy);
+    else root.position.copy(this.pos);
     this.char.animate(dt, 0, true);
     this.char.setGroundOffset(floor - this.pos.y);
   }
@@ -254,8 +259,8 @@ export class NPC implements Villager {
     }
 
     if (this.puppet) {
-      this.char.root.position.copy(this.pos);
-      this.char.root.rotation.x += dt * 3;
+      this.puppetSpin += dt * 3;
+      placeTumbling(this.char.root, this.pos, this.yaw, this.puppetSpin, 0, 0.95 * (this.def.style.scale ?? 1));
       this.char.animate(dt, 0, true);
       return;
     }
@@ -492,6 +497,10 @@ const LANDINGS = ['OW!', 'My spine!', 'I can fly! ...Could. Past tense.', 'Who t
 interface Convo { lines: string[]; when?: () => boolean; pair?: [string, string] }
 const CONVOS: Convo[] = [
   { lines: ['Lovely weather today.', "Is it? I hadn't looked up."] },
+  { lines: ['Took the train to Harbour Halt this morning.', 'It goes in a circle, you know.', '...I ended up back here.'] },
+  { lines: ['Brann got hit by the train again.', 'Third time this week.', "He says he's 'testing the brakes'."] },
+  { lines: ['Is it just me or is the world ending a lot lately?', 'Tuesdays, mostly.', "Today's Wednesday.", 'Oh no.'] },
+  { lines: ['Did a cow just fall out of the sky?', 'Aliens returned it.', 'Ah. Good. Good.'] },
   { lines: ['Did you hear? A stranger came up the road.', 'A stranger? Here? Whatever next.', 'Probably wants to buy cheese.'] },
   { lines: ['Morning!', 'Is it still morning?', "It's always morning somewhere."] },
   { lines: ['The lanterns are still dark...', 'Maren says someone will help.', 'I hope so. I keep walking into the well.'], when: () => state.quest !== 'done' },

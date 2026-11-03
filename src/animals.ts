@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { bake, charMat, Piece, SHAPES } from './character';
+import { bake, charMat, Piece, SHAPES, placeTumbling } from './character';
 import { floorHeight, isWet, inPond, POND, groundNormalY, WORLD_LIMIT } from './terrain';
 import { resolve } from './colliders';
 import { state, take, Item, ITEMS } from './state';
 import { svc } from './interact';
+import { sfx, SoundName } from './audio';
 
 const { BOX } = SHAPES;
 
@@ -26,6 +27,11 @@ interface Spec {
   /** Scared of the dog. */
   timid?: boolean;
 }
+
+const VOICE: Record<AnimalKind, SoundName> = {
+  chicken: 'bawk', dog: 'woof', cat: 'meow', sheep: 'baa', cow: 'moo', pig: 'oink', deer: 'thud',
+  rabbit: 'thud', frog: 'croak', duck: 'quack', gull: 'caw', pigeon: 'coo',
+};
 
 const SPEC: Record<AnimalKind, Spec> = {
   chicken: { name: 'chicken', walk: 0.9, run: 3.8, flee: [1.4, 5], sounds: ['Bawk!', 'Cluck cluck.', 'Bok?', 'BAWK!'], likes: 'berries', idle: ['peck', 'peck', 'look'], range: 6, timid: true },
@@ -287,7 +293,7 @@ export class Animal {
   /** Quest animals that need leading home. */
   lost = false;
   /** Flying through the air (explosions, tornadoes, frog rain...). */
-  air: { v: THREE.Vector3; spin: number } | null = null;
+  air: { v: THREE.Vector3; spin: number; rx: number; rz: number } | null = null;
   /** Position is driven externally (stampedes, tractor beams...). */
   puppet = false;
   hidden = false;
@@ -328,6 +334,7 @@ export class Animal {
     const s = this.spec.sounds;
     this.bubble.textContent = text ?? s[(Math.random() * s.length) | 0];
     this.label.classList.add('barking');
+    if (this.kind !== 'deer' && this.kind !== 'rabbit') sfx.play(VOICE[this.kind], this.pos, { range: 50, gap: 0.12, vol: this.kind === 'cow' ? 0.8 : 0.6 });
     this.barkTimer = 2.4;
     this.barkCd = 8 + Math.random() * 14;
   }
@@ -343,7 +350,7 @@ export class Animal {
   launch(v: THREE.Vector3) {
     if (this.spec.fly || this.puppet) return;
     if (this.air) { this.air.v.add(v); return; }
-    this.air = { v: v.clone(), spin: (Math.random() - 0.5) * 20 };
+    this.air = { v: v.clone(), spin: (Math.random() - 0.5) * 20, rx: 0, rz: 0 };
     this.pos.y += 0.05;
     if (Math.random() < 0.6) this.bark(this.kind === 'cat' ? 'MRROOOWW!' : this.kind === 'frog' ? 'RIBBIIIIT!' : this.spec.sounds[(Math.random() * this.spec.sounds.length) | 0].toUpperCase());
   }
@@ -359,14 +366,24 @@ export class Animal {
     if (this.pos.y <= floor && a.v.y <= 0) {
       this.pos.y = floor;
       this.air = null;
-      this.parts.model.rotation.z = 0;
+      this.root.rotation.set(0, this.yaw, 0);
       if (this.spec.swim && !inPond(this.pos.x, this.pos.z, -0.5)) this.pos.copy(this.home);
       this.mode = 'idle'; this.timer = 0.5 + Math.random(); this.act = 'look';
     } else {
-      this.parts.model.rotation.x += a.spin * dt;
-      this.parts.model.rotation.z += a.spin * 0.5 * dt;
+      a.rx += a.spin * dt;
+      a.rz += a.spin * 0.5 * dt;
     }
-    this.root.position.copy(this.pos);
+    if (this.air) placeTumbling(this.root, this.pos, this.yaw, a.rx, a.rz, this.parts.height * 0.5);
+    else this.root.position.copy(this.pos);
+  }
+
+  /** Wander to a specific spot (e.g. right onto the railway). */
+  goTo(p: THREE.Vector3, t: number) {
+    if (this.puppet || this.air || this.spec.fly) return;
+    this.target.set(p.x, 0, p.z);
+    this.mode = 'walk';
+    this.act = 'none';
+    this.timer = t;
   }
 
   /** Move under external control (keeps the walk cycle animating). */

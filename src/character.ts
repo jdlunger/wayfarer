@@ -265,3 +265,14 @@ export class Character {
 }
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+const _c = new THREE.Vector3();
+/**
+ * Place an object whose origin is at its feet so that it spins around its middle
+ * (height `cy` above the feet) instead of around its toes.
+ */
+export function placeTumbling(obj: THREE.Object3D, feet: THREE.Vector3, yaw: number, rx: number, rz: number, cy: number) {
+  obj.rotation.set(rx, yaw, rz);
+  _c.set(0, cy, 0).applyEuler(obj.rotation);
+  obj.position.set(feet.x, feet.y + cy, feet.z).sub(_c);
+}

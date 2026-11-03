@@ -10,6 +10,8 @@ import { state, SHARDS_NEEDED, ITEMS, Item, isNight, isFestival, addCoins } from
 import { interactables, svc } from './interact';
 import { Dialogue } from './dialogue';
 import { Chaos } from './chaos';
+import { Railway } from './railway';
+import { sfx } from './audio';
 import { clamp, lerp, smoothstep } from './noise';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -68,6 +70,7 @@ const loading = performance.now();
 scene.add(buildTerrainMesh(), buildWater());
 const spots = findSpots();
 const village = buildVillage(scene, spots.shore, spots.hill);
+const railway = new Railway(scene, village.clearings);
 buildVegetation(scene, village.clearings);
 const shards = buildShards(scene, spots.shardSites.slice(0, 7));
 const player = new Player(scene);
@@ -88,6 +91,8 @@ console.log(`World built in ${(performance.now() - loading).toFixed(0)} ms — $
 const dialogue = new Dialogue();
 let talkingTo: NPC | null = null;
 const chaos = new Chaos({ scene, player, npcs, animals, labels: labelsEl, canHitPlayer: () => !dialogue.active });
+railway.chaos = chaos;
+railway.world = { player, npcs, animals };
 
 // ---------- Services used by world objects ----------
 svc.dialog = (name, script, onClose) => dialogue.open(name, script, () => { onClose?.(); updateQuestLog(); });
@@ -174,6 +179,18 @@ mapImg.width = mapImg.height = MAP;
     }
   }
   ictx.putImageData(img, 0, 0);
+  // Railway line
+  const loop = railway.loopPoints;
+  ictx.beginPath();
+  loop.forEach((p, i) => (i ? ictx.lineTo : ictx.moveTo).call(ictx, (p.x / WORLD + 0.5) * MAP, (p.z / WORLD + 0.5) * MAP));
+  ictx.closePath();
+  ictx.strokeStyle = '#3a2f28'; ictx.lineWidth = 2.5; ictx.stroke();
+  ictx.strokeStyle = '#c8b89a'; ictx.lineWidth = 1; ictx.setLineDash([2, 2]); ictx.stroke(); ictx.setLineDash([]);
+  for (const st of railway.stations) {
+    ictx.fillStyle = '#f4ecd8'; ictx.strokeStyle = '#1f3a5a'; ictx.lineWidth = 1.5;
+    ictx.fillRect((st.center.x / WORLD + 0.5) * MAP - 2.5, (st.center.z / WORLD + 0.5) * MAP - 2.5, 5, 5);
+    ictx.strokeRect((st.center.x / WORLD + 0.5) * MAP - 2.5, (st.center.z / WORLD + 0.5) * MAP - 2.5, 5, 5);
+  }
 }
 const toMap = (v: number) => (v / WORLD + 0.5) * MAP;
 
@@ -190,6 +207,7 @@ function drawMinimap() {
     dot(n.pos.x, n.pos.z, 2.5, '#ffd36b', '#432');
   }
   for (const a of [clover, mittens]) if (a.follow) dot(a.pos.x, a.pos.z, 2, '#fff', '#333');
+  for (const t of railway.trainHeads) dot(t.x, t.z, 3, '#e84a3a', '#200');
   // Player arrow
   const px = toMap(player.pos.x), pz = toMap(player.pos.z);
   mctx.translate(px, pz);
@@ -415,6 +433,7 @@ function frame(now: number) {
   const paused = !started || !helpEl.classList.contains('hidden');
 
   if (input.hit('KeyQ')) { qIndex = (qIndex + 1) % QUALITIES.length; renderScale = 1; applyQuality(); }
+  if (input.hit('KeyM')) state.toast(sfx.toggleMute() ? 'Sound off' : 'Sound on');
   if (input.hit('KeyF')) { showStats = !showStats; statsEl.style.display = showStats ? 'block' : 'none'; }
 
   const { lightDir } = updateSky(paused ? 0 : dt);
@@ -476,6 +495,7 @@ function frame(now: number) {
     village.update(dt);
     if (input.hit('KeyX')) chaos.trigger();
     chaos.update(dt);
+    railway.update(dt);
     if (chaos.activeTitles.join() !== lastChaos) { lastChaos = chaos.activeTitles.join(); updateQuestLog(); }
 
     // Interaction prompt
@@ -505,6 +525,7 @@ function frame(now: number) {
 
   updateCamera(dt, dialogue.active || paused);
   if (!paused) chaos.applyCamera(camera);
+  sfx.setListener(camera);
 
   // Shadow camera follows the player; snap to texels to prevent shimmering.
   const texel = 90 / sun.shadow.mapSize.x;
@@ -543,4 +564,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Handy for debugging from the browser console.
-(window as unknown as Record<string, unknown>).game = { player, npcs, animals, shards, state, village, chaos, setTime: (t: number) => { state.time = t; } };
+(window as unknown as Record<string, unknown>).game = { player, npcs, animals, shards, state, village, chaos, railway, sfx, setTime: (t: number) => { state.time = t; } };
