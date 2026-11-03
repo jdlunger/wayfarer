@@ -710,7 +710,7 @@ export class Railway {
       c.ringing = near;
       const blink = near && Math.sin(performance.now() * 0.009) > 0;
       c.lamps.forEach((l, i) => (l.material as THREE.MeshBasicMaterial).color.set(near && (i % 2 === 0) === blink ? '#ff3a2a' : '#3a1010'));
-      if (near && (c.bellT -= dt) <= 0) { c.bellT = 0.55; sfx.play('bell', c.pos, { range: 45, vol: 0.35 }); }
+      if (near && (c.bellT -= dt) <= 0) { c.bellT = 1.6; sfx.play('bell', c.pos, { range: 35, vol: 0.25 }); }
     }
   }
 

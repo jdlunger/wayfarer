@@ -880,13 +880,13 @@ const EVENTS: EventDef[] = [
         tick: (dt: number) => {
           let near = 99;
           for (const g of gs) if (g.warn <= 0 && g.blow > 0) near = Math.min(near, flat(g.p, this.p));
-          hiss.setVolume(Math.max(0, 0.6 - near / 60));
+          hiss.setVolume(Math.max(0, 0.3 - near / 120));
           for (const g of gs) {
             const p = g.p;
             if (g.warn > 0) {
               g.warn -= dt;
               if (Math.random() < 0.6) this._fx.emit(p.x + rnd(-1, 1), p.y + 0.1, p.z + rnd(-1, 1), 0, rnd(1, 3), 0, 0.5, 0.25, pick(WATERC), 0.5, 1);
-              if (g.warn <= 0) { sfx.play('splash', p, { range: 90, vol: 1.2 }); this.shake = Math.max(this.shake, Math.max(0, 1 - flat(p, this.p) / 30)); this.panic(p, 15, ['Is the ground... gurgling?', 'WATER!', 'Sploosh!']); }
+              if (g.warn <= 0) { sfx.play('splash', p, { range: 90, vol: 0.6 }); this.shake = Math.max(this.shake, Math.max(0, 1 - flat(p, this.p) / 30)); this.panic(p, 15, ['Is the ground... gurgling?', 'WATER!', 'Sploosh!']); }
             } else if (g.blow > 0) {
               g.blow -= dt;
               for (let k = 0; k < 10; k++) this._fx.emit(p.x + rnd(-0.6, 0.6), p.y, p.z + rnd(-0.6, 0.6), rnd(-1.5, 1.5), rnd(25, 38), rnd(-1.5, 1.5), rnd(1, 1.6), rnd(0.3, 0.6), pick(WATERC), 1, 0.2);
