@@ -302,6 +302,8 @@ class Train {
   get loco() { return this.cars[0]; }
 }
 
+export interface Crossing { s: number; pos: THREE.Vector3; t: THREE.Vector3; right: THREE.Vector3; lamps: THREE.Mesh[]; ringing: boolean; bellT: number }
+
 export class Railway {
   readonly track: Track;
   readonly stations: Station[] = [];
@@ -311,6 +313,8 @@ export class Railway {
   chaos: Chaos | null = null;
   world: { player: Player; npcs: NPC[]; animals: Animal[] } | null = null;
   private mischiefT = 40;
+  /** Level crossings where paths cross the line (people and herds aim for these). */
+  readonly crossings: Crossing[] = [];
 
   constructor(private scene: THREE.Scene, clearings: { x: number; z: number; r: number }[]) {
     // A gently wavy loop just outside the village plateau.
@@ -345,12 +349,74 @@ export class Railway {
     }
     this.stations.sort((a, b) => a.s - b.s);
 
+    // Level crossings between the stations, placed where the line sits closest to the ground.
+    for (const ang of [0.25, 1.6, 2.3, 3.95, 5.45]) {
+      const s0 = T.project(Math.cos(ang) * 62, Math.sin(ang) * 62).s;
+      let best = s0, bh = Infinity;
+      for (let k = -24; k <= 24; k += 2) {
+        const p = T.pos(s0 + k);
+        const h = p.y - groundHeight(p.x, p.z);
+        if (h < bh) { bh = h; best = s0 + k; }
+      }
+      this.crossings.push(this.buildCrossing(((best % T.length) + T.length) % T.length, clearings));
+    }
+
     for (let i = 0; i < 2; i++) {
       const tr = new Train(i, this.stations[i * 2].s + 26, scene);
       tr.next = (i * 2 + 1) % this.stations.length;
       this.trains.push(tr);
     }
     this.trains.forEach(t => this.placeTrain(t));
+  }
+
+  private buildCrossing(s: number, clearings: { x: number; z: number; r: number }[]): Crossing {
+    const T = this.track;
+    const p = T.pos(s), t = T.tangent(s);
+    const yaw = Math.atan2(t.x, t.z);
+    const right = V(t.z, 0, -t.x);
+    const top = p.y + 0.02;
+    // Plank deck over the rails
+    const deck = new THREE.Mesh(bake([
+      [BOX, '#7a5a3a', 0, -0.12, 0, 4.4, 0.24, 2.8],
+      ...[-1.05, -0.35, 0.35, 1.05].map(z => [BOX, '#6a4a2e', 0, 0.005, z, 4.4, 0.02, 0.08] as Piece),
+    ]), charMat);
+    deck.position.set(p.x, top, p.z);
+    deck.rotation.y = yaw;
+    deck.receiveShadow = true;
+    this.scene.add(deck);
+    addPlatform(p.x, p.z, 2.2, 1.4, yaw, top);
+    clearings.push({ x: p.x, z: p.z, r: 7 });
+    // Crossbuck signs with warning lamps, one each side
+    const lamps: THREE.Mesh[] = [];
+    const lampMat = new THREE.MeshBasicMaterial({ color: '#3a1010' });
+    for (const side of [-1, 1]) {
+      const g = new THREE.Group();
+      const at = p.clone().addScaledVector(right, side * 2.9).addScaledVector(t, side * 1.8);
+      g.position.set(at.x, groundHeight(at.x, at.z), at.z);
+      g.rotation.y = yaw + Math.PI / 2;
+      const post = new THREE.Mesh(bake([[CYL, '#e8e4dc', 0, 1.4, 0, 0.1, 2.8, 0.1], [BOX, '#222', 0, 1.95, 0.02, 0.7, 0.24, 0.12]]), charMat);
+      post.castShadow = true;
+      g.add(post);
+      for (const r of [0.65, -0.65]) {
+        const bar = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: '#f2efe8' }));
+        bar.scale.set(1.3, 0.18, 0.04);
+        bar.position.set(0, 2.6, 0.08);
+        bar.rotation.z = r;
+        const stripe = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: '#c8302a' }));
+        stripe.scale.set(0.3, 1.05, 1.1);
+        bar.add(stripe);
+        g.add(bar);
+      }
+      for (const x of [-0.22, 0.22]) {
+        const lamp = new THREE.Mesh(BALL, lampMat.clone());
+        lamp.scale.setScalar(0.3);
+        lamp.position.set(x, 1.95, 0.12);
+        g.add(lamp);
+        lamps.push(lamp);
+      }
+      this.scene.add(g);
+    }
+    return { s, pos: p.clone().setY(top), t: t.clone(), right, lamps, ringing: false, bellT: 0 };
   }
 
   private buildStation(name: string, s: number, clearings: { x: number; z: number; r: number }[]): Station {
@@ -628,6 +694,46 @@ export class Railway {
     }
 
     this.mischief(dt);
+    this.updateCrossings(dt);
+  }
+
+  /** Crossing lamps flash and the bell rings while a train is near. */
+  private updateCrossings(dt: number) {
+    const T = this.track;
+    for (const c of this.crossings) {
+      let near = false;
+      for (const tr of this.trains) {
+        const ahead = ((c.s - tr.s) % T.length + T.length) % T.length;       // crossing ahead of the loco
+        const behind = ((tr.s - tr.length - c.s) % T.length + T.length) % T.length; // tail still to clear
+        if ((ahead < 45 && tr.v > 0.5) || ahead < 8 || ahead > T.length - tr.length - 2 || behind < 2) near = true;
+      }
+      c.ringing = near;
+      const blink = near && Math.sin(performance.now() * 0.009) > 0;
+      c.lamps.forEach((l, i) => (l.material as THREE.MeshBasicMaterial).color.set(near && (i % 2 === 0) === blink ? '#ff3a2a' : '#3a1010'));
+      if (near && (c.bellT -= dt) <= 0) { c.bellT = 0.55; sfx.play('bell', c.pos, { range: 45, vol: 0.35 }); }
+    }
+  }
+
+  /** Is a train about to come through (or still going through) this crossing? */
+  crossingBusy(c: Crossing) { return c.ringing; }
+  /** The crossing closest to a point. */
+  nearestCrossing(x: number, z: number) {
+    let best = this.crossings[0], bd = Infinity;
+    for (const c of this.crossings) { const d = Math.hypot(c.pos.x - x, c.pos.z - z); if (d < bd) { bd = d; best = c; } }
+    return best;
+  }
+  /** +1 if the point is outside the loop, -1 if inside. */
+  sideOf(x: number, z: number) {
+    const pr = this.track.project(x, z);
+    const tp = this.track.pos(pr.s);
+    return Math.hypot(x, z) > Math.hypot(tp.x, tp.z) ? 1 : -1;
+  }
+  /** A point beside the line at angle `ang`, `off` metres outward (negative = toward the village). */
+  besideLine(ang: number, off: number) {
+    const pr = this.track.project(Math.cos(ang) * 62, Math.sin(ang) * 62);
+    const tp = this.track.pos(pr.s);
+    const r = Math.hypot(tp.x, tp.z);
+    return V(tp.x / r * (r + off), 0, tp.z / r * (r + off));
   }
 
   private locoPos(tr: Train) { return this.track.pos(tr.s - tr.loco.offset); }
@@ -679,6 +785,7 @@ export class Railway {
         blocked = true;
         if (b.kind === 'npc' && Math.random() < 0.55) b.n.startReact('scared', 1.6, head, pick(['TRAIN!', 'Whoa!', 'Mind the train!', 'Not today, iron beast!']), T.pos(pr.s));
         else if (b.kind === 'animal' && Math.random() < 0.5) b.a.startFlee(T.pos(pr.s), 2);
+        else if (b.kind === 'other' && Math.random() < 0.6) b.o.scare(head, pick(['TRAIN!', 'Whoa whoa whoa!', 'Mind the train!', 'Not today, iron beast!']));
       });
       if (blocked) { sfx.play('horn', head, { range: 200 }); tr.hornCd = 4; }
     }
@@ -690,7 +797,7 @@ export class Railway {
         const along = dx * t.x + dz * t.z, lat = dx * t.z - dz * t.x;
         if (Math.abs(along) > c.half + 0.35 || Math.abs(lat) > 1.55) return;
         if (pos.y > cp.y + 3.4 || pos.y < cp.y - 2) return;
-        const airborne = b.kind === 'player' ? this.world!.player.airborne : b.kind === 'npc' ? !!b.n.air : !!b.a.air;
+        const airborne = b.kind === 'player' ? this.world!.player.airborne : b.kind === 'npc' ? !!b.n.air : b.kind === 'other' ? b.o.airborne : !!b.a.air;
         const sgn = lat >= 0 ? 1 : -1;
         if (tr.v > 2.5 && !airborne) {
           const v = V(t.x * tr.v * 1.3 + t.z * sgn * 7, 7 + tr.v * 0.6, t.z * tr.v * 1.3 - t.x * sgn * 7);
@@ -698,6 +805,7 @@ export class Railway {
           sfx.play('thud', pos, { range: 70 });
           sfx.play('horn', cp, { range: 200, gap: 2 });
           if (b.kind === 'npc') setTimeout(() => b.n.bark(pick(['I was on the TRACKS?!', 'Who put a railway there?!', 'Ticket... please...', 'Next time I\'m taking the cart.', 'Ow. Choo choo.']), 3.5), 900);
+          if (b.kind === 'other') setTimeout(() => b.o.bark(pick(['I LOOKED both ways!', 'Who put a railway there?!', 'Ticket... please...', 'I should have taken the crossing.', 'Ow. Choo choo.'])), 900);
           if (b.kind === 'player') state.toast(pick(['Hit by a train. Character building.', 'You have been delivered.', 'Mind the gap. And the train.']));
         } else if (!airborne) {
           // Slow/stopped: just nudge them off to the side.

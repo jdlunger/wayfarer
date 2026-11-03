@@ -34,7 +34,7 @@ body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #f4
   position: fixed; bottom: 18%; left: 50%; transform: translateX(-50%); padding: 8px 16px; border-radius: 20px;
   background: rgba(20, 16, 12, 0.7); font-size: 15px; pointer-events: none; display: none;
 }
-#prompt kbd, #help kbd {
+#prompt kbd, #help kbd, #keys kbd {
   display: inline-block; min-width: 22px; padding: 1px 6px; margin-right: 4px; border-radius: 4px; text-align: center;
   background: #f4efe6; color: #2a2218; font: 600 12px/18px system-ui, sans-serif; box-shadow: 0 2px 0 #9c8f78;
 }
@@ -75,20 +75,11 @@ body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #f4
 
 #quest .chaos { display: inline-block; margin-top: 6px; color: #ff9a6a; font-weight: 700; font-size: 13px; letter-spacing: .03em; }
 
-#chaos {
-  position: fixed; top: 9%; left: 50%; transform: translateX(-50%) scale(0.6); text-align: center; pointer-events: none; opacity: 0;
-  font-family: Impact, "Arial Black", system-ui, sans-serif; color: #fff2d6;
-  text-shadow: 0 0 12px #ff3b1f, 0 3px 0 #7a1a08, 0 6px 14px #000;
+
+#keys {
+  position: fixed; right: 14px; bottom: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 14px;
+  max-width: calc(100vw - 28px); padding: 8px 12px; border-radius: 8px; background: rgba(20, 16, 12, 0.5);
+  font-size: 13px; color: #e8dfcf; pointer-events: none; text-shadow: 0 1px 2px #000;
 }
-#chaos b { display: block; font-size: clamp(28px, 6vw, 64px); letter-spacing: .04em; }
-#chaos small { display: block; font: italic 600 clamp(14px, 2vw, 19px) Georgia, serif; color: #ffe0b0; text-shadow: 0 2px 4px #000; }
-#chaos.show { animation: chaosSlam 3.2s cubic-bezier(.2, 1.6, .4, 1) forwards; }
-@keyframes chaosSlam {
-  0% { opacity: 0; transform: translateX(-50%) scale(2.6) rotate(-6deg); }
-  10% { opacity: 1; transform: translateX(-50%) scale(1) rotate(2deg); }
-  14% { transform: translateX(calc(-50% - 8px)) scale(1.04) rotate(-2deg); }
-  18% { transform: translateX(calc(-50% + 8px)) scale(1) rotate(1deg); }
-  22% { transform: translateX(-50%) scale(1) rotate(0); }
-  85% { opacity: 1; transform: translateX(-50%) scale(1); }
-  100% { opacity: 0; transform: translateX(-50%) scale(0.9) translateY(-20px); }
-}
+#keys kbd { margin-right: 2px; min-width: 20px; padding: 0 5px; font-size: 11px; line-height: 16px; text-shadow: none; }
+#keys.hidden { display: none; }

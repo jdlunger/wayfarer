@@ -8,7 +8,8 @@ import { sfx, SoundName } from './audio';
 
 const { BOX } = SHAPES;
 
-export type AnimalKind = 'chicken' | 'dog' | 'cat' | 'sheep' | 'cow' | 'pig' | 'deer' | 'rabbit' | 'frog' | 'duck' | 'gull' | 'pigeon';
+export type AnimalKind = 'chicken' | 'dog' | 'cat' | 'sheep' | 'cow' | 'pig' | 'deer' | 'rabbit' | 'frog' | 'duck' | 'gull' | 'pigeon'
+  | 'fox' | 'boar' | 'goat' | 'horse' | 'crow';
 type Act = 'none' | 'graze' | 'peck' | 'sit' | 'sleep' | 'look';
 
 interface Spec {
@@ -31,6 +32,7 @@ interface Spec {
 const VOICE: Record<AnimalKind, SoundName> = {
   chicken: 'bawk', dog: 'woof', cat: 'meow', sheep: 'baa', cow: 'moo', pig: 'oink', deer: 'thud',
   rabbit: 'thud', frog: 'croak', duck: 'quack', gull: 'caw', pigeon: 'coo',
+  fox: 'woof', boar: 'oink', goat: 'baa', horse: 'thud', crow: 'caw',
 };
 
 const SPEC: Record<AnimalKind, Spec> = {
@@ -45,6 +47,11 @@ const SPEC: Record<AnimalKind, Spec> = {
   frog: { name: 'frog', walk: 1.4, run: 3.4, flee: [1.3, 3], sounds: ['Ribbit.', 'Croak!', 'Rrrbt.'], idle: ['sit', 'sit', 'look'], range: 6, hop: 0.3 },
   duck: { name: 'duck', walk: 0.8, run: 2.4, flee: [1.5, 3.5], sounds: ['Quack!', 'Quack quack.', '*splash*'], likes: 'berries', idle: ['look', 'peck'], range: 4, swim: true },
   gull: { name: 'gull', walk: 4, run: 6, flee: [0, 0], sounds: ['Caw!', 'Kee-ow!', 'Caw caw!'], idle: ['none'], range: 14, fly: true },
+  fox: { name: 'fox', walk: 1.5, run: 7, flee: [5, 12], sounds: ['*yip*', '*sniff*', 'Yip yip!'], likes: 'fish', idle: ['look', 'sit', 'sleep'], range: 16, timid: true },
+  boar: { name: 'wild boar', walk: 1.0, run: 4.5, flee: [0, 4], sounds: ['*GRUNT*', 'Snrrrk.', 'Hrmph.'], likes: 'mushrooms', idle: ['graze', 'graze', 'look'], range: 10 },
+  goat: { name: 'goat', walk: 1.0, run: 4, flee: [0, 3], sounds: ['Meeeh!', 'Bleat.', 'MEHHH.'], likes: 'flowers', idle: ['graze', 'look', 'graze'], range: 9 },
+  horse: { name: 'wild horse', walk: 1.3, run: 8, flee: [4, 12], sounds: ['*whinny*', '*snort*', '*neigh*'], likes: 'apples', idle: ['graze', 'graze', 'look'], range: 18 },
+  crow: { name: 'crow', walk: 3.5, run: 5, flee: [0, 0], sounds: ['CAW!', 'Kraa!', 'Caw caw caw.'], idle: ['none'], range: 9, fly: true },
   pigeon: { name: 'pigeon', walk: 0.9, run: 3, flee: [1.2, 4], sounds: ['Coo.', 'Coo-roo.', '*flap flap*'], likes: 'berries', idle: ['peck', 'peck', 'look'], range: 5, timid: true },
 };
 
@@ -238,6 +245,65 @@ function build(kind: AnimalKind, v: number): Parts {
         headExtra: [[BOX, '#5a8a7a', 0, -0.02, 0.06, 0.13, 0.05, 0.1]],
         tail: [[BOX, '#5a5f68', 0, 0.0, -0.04, 0.14, 0.04, 0.14]],
       });
+    case 'fox': {
+      const c = '#d8682a';
+      return quad(k, {
+        bw: 0.24, bh: 0.26, bl: 0.62, legH: 0.26, legW: 0.07, body: c, leg: '#2a1e18', head: c, hs: 0.24,
+        bodyExtra: by => [[BOX, '#f4ece0', 0, by - 0.1, 0.12, 0.18, 0.08, 0.3]],
+        headPieces: (hy, f) => [
+          [BOX, c, 0, hy - 0.05, f + 0.08, 0.12, 0.1, 0.16], [BOX, '#f4ece0', 0, hy - 0.09, f + 0.06, 0.13, 0.04, 0.12],
+          [BOX, '#111', 0, hy - 0.03, f + 0.17, 0.05, 0.04, 0.03],
+          [BOX, c, -0.08, hy + 0.17, f - 0.12, 0.08, 0.14, 0.04], [BOX, c, 0.08, hy + 0.17, f - 0.12, 0.08, 0.14, 0.04],
+          [BOX, '#111', -0.06, hy + 0.04, f, 0.04, 0.04, 0.02], [BOX, '#111', 0.06, hy + 0.04, f, 0.04, 0.04, 0.02],
+        ],
+        tail: [[BOX, c, 0, -0.2, 0, 0.14, 0.42, 0.14], [BOX, '#f4ece0', 0, -0.45, 0, 0.12, 0.1, 0.12]], tailTilt: 1.0,
+      });
+    }
+    case 'boar': {
+      const c = '#4a3a2e';
+      return quad(k, {
+        bw: 0.5, bh: 0.5, bl: 0.95, legH: 0.26, legW: 0.12, body: c, leg: '#2e241c', head: c, hs: 0.38,
+        bodyExtra: by => [[BOX, '#2a201a', 0, by + 0.27, 0, 0.12, 0.1, 0.8]],
+        headPieces: (hy, f) => [
+          [BOX, '#6a5040', 0, hy - 0.08, f + 0.05, 0.2, 0.16, 0.1],
+          [BOX, '#f0e8d0', -0.12, hy - 0.02, f + 0.04, 0.04, 0.14, 0.04], [BOX, '#f0e8d0', 0.12, hy - 0.02, f + 0.04, 0.04, 0.14, 0.04],
+          [BOX, '#111', -0.1, hy + 0.08, f, 0.04, 0.04, 0.02], [BOX, '#111', 0.1, hy + 0.08, f, 0.04, 0.04, 0.02],
+          [BOX, c, -0.15, hy + 0.2, f - 0.18, 0.08, 0.1, 0.06], [BOX, c, 0.15, hy + 0.2, f - 0.18, 0.08, 0.1, 0.06],
+        ],
+        tail: [[BOX, c, 0, -0.1, -0.02, 0.04, 0.2, 0.04]], tailTilt: 0.3,
+      });
+    }
+    case 'goat': {
+      const c = ['#e8e2d6', '#8a6a4a', '#3a3330', '#c8b8a0'][v % 4];
+      return quad(k, {
+        bw: 0.34, bh: 0.38, bl: 0.72, legH: 0.42, legW: 0.08, body: c, leg: c, head: c, hs: 0.24, neckUp: 0.12,
+        headPieces: (hy, f) => [
+          [BOX, c, 0, hy - 0.06, f + 0.06, 0.14, 0.14, 0.16], [BOX, c, 0, hy - 0.2, f + 0.02, 0.06, 0.14, 0.05],
+          [BOX, '#5a5048', -0.07, hy + 0.2, f - 0.2, 0.05, 0.22, 0.05], [BOX, '#5a5048', 0.07, hy + 0.2, f - 0.2, 0.05, 0.22, 0.05],
+          [BOX, c, -0.17, hy + 0.04, f - 0.15, 0.14, 0.05, 0.07], [BOX, c, 0.17, hy + 0.04, f - 0.15, 0.14, 0.05, 0.07],
+          [BOX, '#e8c040', -0.09, hy + 0.06, f - 0.02, 0.04, 0.04, 0.02], [BOX, '#e8c040', 0.09, hy + 0.06, f - 0.02, 0.04, 0.04, 0.02],
+        ],
+        tail: [[BOX, c, 0, 0.08, 0, 0.06, 0.14, 0.05]], tailTilt: -0.9,
+      });
+    }
+    case 'horse': {
+      const c = ['#7a4a2a', '#2a2420', '#d8c8a8', '#a87a4a'][v % 4], m = v % 4 === 2 ? '#f4ece0' : '#1e1612';
+      return quad(k, {
+        bw: 0.55, bh: 0.62, bl: 1.6, legH: 0.95, legW: 0.14, body: c, leg: c, head: c, hs: 0.34, neckUp: 0.55,
+        headPieces: (hy, f) => [
+          [BOX, c, 0, hy - 0.38, -0.12, 0.24, 0.7, 0.32], [BOX, m, 0, hy - 0.2, -0.3, 0.06, 0.8, 0.12],
+          [BOX, c, 0, hy - 0.06, f + 0.12, 0.24, 0.24, 0.32], [BOX, '#111', 0, hy - 0.1, f + 0.28, 0.2, 0.1, 0.02],
+          [BOX, '#111', -0.18, hy + 0.06, f - 0.06, 0.02, 0.06, 0.06], [BOX, '#111', 0.18, hy + 0.06, f - 0.06, 0.02, 0.06, 0.06],
+          [BOX, c, -0.09, hy + 0.23, f - 0.24, 0.07, 0.14, 0.06], [BOX, c, 0.09, hy + 0.23, f - 0.24, 0.07, 0.14, 0.06],
+        ],
+        tail: [[BOX, m, 0, -0.3, -0.05, 0.12, 0.65, 0.12]], tailTilt: 0.35,
+      });
+    }
+    case 'crow':
+      return bird(k, {
+        bw: 0.2, bh: 0.18, bl: 0.36, legH: 0.1, body: '#1c1c22', head: '#1c1c22', hs: 0.13, beak: '#2a2a2a', leg: '#2a2a2a', wing: '#24242c', span: 0.45,
+        tail: [[BOX, '#16161a', 0, 0, -0.04, 0.14, 0.04, 0.16]],
+      });
     case 'gull':
       return bird(k, {
         bw: 0.22, bh: 0.2, bl: 0.5, legH: 0.12, body: '#f4f4f0', head: '#f4f4f0', hs: 0.15, beak: '#e8c030', leg: '#e8c030', wing: '#9aa0a8', span: 0.6,
@@ -304,7 +370,7 @@ export class Animal {
     this.spec = SPEC[kind];
     this.parts = build(kind, opts.variant ?? (Math.random() * 4) | 0);
     this.root.add(this.parts.model);
-    this.small = kind === 'frog' || kind === 'pigeon' || kind === 'rabbit' || kind === 'duck' || kind === 'chicken' || kind === 'gull';
+    this.small = kind === 'frog' || kind === 'pigeon' || kind === 'rabbit' || kind === 'duck' || kind === 'chicken' || kind === 'gull' || kind === 'crow' || kind === 'fox';
     if (this.small) this.root.traverse(o => (o.castShadow = false));
     scene.add(this.root);
     this.home = home.clone();
@@ -334,7 +400,7 @@ export class Animal {
     const s = this.spec.sounds;
     this.bubble.textContent = text ?? s[(Math.random() * s.length) | 0];
     this.label.classList.add('barking');
-    if (this.kind !== 'deer' && this.kind !== 'rabbit') sfx.play(VOICE[this.kind], this.pos, { range: 50, gap: 0.12, vol: this.kind === 'cow' ? 0.8 : 0.6 });
+    if (this.kind !== 'deer' && this.kind !== 'rabbit' && this.kind !== 'horse') sfx.play(VOICE[this.kind], this.pos, { range: 50, gap: 0.12, vol: this.kind === 'cow' ? 0.8 : 0.6 });
     this.barkTimer = 2.4;
     this.barkCd = 8 + Math.random() * 14;
   }
@@ -656,6 +722,8 @@ export interface AnimalSpots {
   plaza: THREE.Vector3;
   farm: THREE.Vector3;
   wild: THREE.Vector3[];
+  /** Extra countryside spots outside the village for herds and wildlife. */
+  outback?: THREE.Vector3[];
   mittens: THREE.Vector3;
   clover: THREE.Vector3;
 }
@@ -692,6 +760,17 @@ export function spawnAnimals(scene: THREE.Scene, labels: HTMLElement, s: AnimalS
   s.wild.forEach((p, i) => {
     if (i % 3 === 0) for (let j = 0; j < 3; j++) add('deer', p, { variant: j, range: 16 }, 5);
     else for (let j = 0; j < 2; j++) add('rabbit', p, { variant: j + i, range: 9 }, 4);
+  });
+  // The countryside beyond the village: herds, packs and loners.
+  const herds: [AnimalKind, number, number, number][] = [
+    // kind, how many, roaming range, scatter
+    ['horse', 4, 22, 6], ['goat', 5, 10, 4], ['boar', 3, 11, 4], ['fox', 1, 18, 1], ['deer', 3, 16, 5],
+    ['rabbit', 3, 9, 4], ['crow', 3, 9, 1], ['sheep', 4, 8, 4], ['fox', 1, 18, 1], ['goat', 3, 10, 4],
+    ['horse', 3, 22, 6], ['boar', 2, 11, 4], ['rabbit', 2, 9, 4], ['crow', 2, 12, 1], ['cow', 3, 9, 4],
+  ];
+  (s.outback ?? []).forEach((p, i) => {
+    const [kind, n, range, jitter] = herds[i % herds.length];
+    for (let j = 0; j < n; j++) add(kind, p, { variant: j + i, range: range + (SPEC[kind].fly ? j * 3 : 0) }, jitter);
   });
   return out;
 }

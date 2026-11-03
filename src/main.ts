@@ -11,6 +11,7 @@ import { interactables, svc } from './interact';
 import { Dialogue } from './dialogue';
 import { Chaos } from './chaos';
 import { Railway } from './railway';
+import { Wilds, outbackSpots } from './wilds';
 import { sfx } from './audio';
 import { clamp, lerp, smoothstep } from './noise';
 
@@ -80,9 +81,10 @@ const byId = (id: string) => npcs.find(n => n.def.id === id)!;
 const pip = byId('pip'), lotte = byId('lotte'), wren = byId('wren');
 const society = new Society(npcs);
 const VS = village.spots;
+const outback = outbackSpots(30);
 const animals: Animal[] = spawnAnimals(scene, labelsEl, {
   coop: VS.coop, pen: VS.pen, pigpen: VS.pigpen, pond: VS.pond, dock: VS.dockEnd, plaza: VS.plaza, farm: VS.field,
-  wild: village.wild, mittens: VS.mittens, clover: VS.clover,
+  wild: village.wild, mittens: VS.mittens, clover: VS.clover, outback: outback.slice(0, 15),
 });
 const clover = animals.find(a => a.name === 'Clover')!;
 const mittens = animals.find(a => a.name === 'Mittens')!;
@@ -90,7 +92,8 @@ console.log(`World built in ${(performance.now() - loading).toFixed(0)} ms — $
 
 const dialogue = new Dialogue();
 let talkingTo: NPC | null = null;
-const chaos = new Chaos({ scene, player, npcs, animals, labels: labelsEl, canHitPlayer: () => !dialogue.active });
+const wilds = new Wilds(scene, labelsEl, railway, animals, outback);
+const chaos = new Chaos({ scene, player, npcs, animals, labels: labelsEl, canHitPlayer: () => !dialogue.active, extras: wilds.travellers });
 railway.chaos = chaos;
 railway.world = { player, npcs, animals };
 
@@ -304,15 +307,17 @@ let distIdx = 1;
 
 function updateCamera(dt: number, locked: boolean) {
   if (!locked) {
-    if (input.down('ArrowUp')) camPitch = Math.min(1.2, camPitch + dt * 1.2);
-    if (input.down('ArrowDown')) camPitch = Math.max(-0.05, camPitch - dt * 1.2);
+    // Up looks up (camera drops toward the ground), down looks down from above.
+    if (input.down('ArrowDown')) camPitch = Math.min(1.2, camPitch + dt * 1.2);
+    if (input.down('ArrowUp')) camPitch = Math.max(-0.6, camPitch - dt * 1.2);
   }
   if (input.hit('KeyC')) { distIdx = (distIdx + 1) % DISTS.length; }
   camDist += (DISTS[distIdx] - camDist) * Math.min(1, dt * 6);
 
   let dh = player.heading - camHeading;
   dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-  camHeading += dh * Math.min(1, dt * 8);
+  // A little lag when turning: the camera swings round after the player.
+  camHeading += dh * Math.min(1, dt * 3.2);
 
   let heading = camHeading, dist = camDist, pitch = camPitch;
   const focus = talkingTo ? talkingTo.pos : null;
@@ -325,12 +330,17 @@ function updateCamera(dt: number, locked: boolean) {
   camTarget.lerp(want, Math.min(1, dt * 12));
   if (camTarget.lengthSq() === 0 || camTarget.distanceTo(want) > 20) camTarget.copy(want);
 
-  const cx = camTarget.x - Math.sin(heading) * Math.cos(pitch) * dist;
-  const cz = camTarget.z - Math.cos(heading) * Math.cos(pitch) * dist;
-  let cy = camTarget.y + Math.sin(pitch) * dist;
-  cy = Math.max(cy, groundHeight(cx, cz) + 0.6, 0.4);
+  // Below the horizon the camera slides along the ground toward the player's feet and tilts up.
+  const below = Math.max(0, -pitch);
+  const orbit = Math.max(pitch, 0);
+  const hd = Math.cos(orbit) * dist * (1 - below * 0.35);
+  const cx = camTarget.x - Math.sin(heading) * hd;
+  const cz = camTarget.z - Math.cos(heading) * hd;
+  let cy = camTarget.y + Math.sin(orbit) * dist - below * 1.6;
+  cy = Math.max(cy, groundHeight(cx, cz) + 0.45, 0.4);
   camera.position.lerp(new THREE.Vector3(cx, cy, cz), focus ? Math.min(1, dt * 4) : 1);
-  const look = focus ? camTarget.clone().lerp(new THREE.Vector3(focus.x, focus.y + 1.5, focus.z), 0.5) : camTarget;
+  const look = focus ? camTarget.clone().lerp(new THREE.Vector3(focus.x, focus.y + 1.5, focus.z), 0.5)
+    : below > 0 ? camTarget.clone().setY(camTarget.y + Math.tan(below * 0.55) * hd) : camTarget;
   camera.lookAt(look);
 }
 
@@ -357,6 +367,7 @@ function nearestInteraction(): Choice | null {
     consider(n.pos, 3.2, () => `Talk to ${n.def.name}`, () => startTalk(n));
   }
   for (const a of animals) if (a.root.visible) consider(a.pos, 2.4, () => a.promptLabel(), () => a.interact(player.pos));
+  for (const t of wilds.travellers) if (t.active && !t.airborne) consider(t.pos, 3, () => `Chat with ${t.name}`, () => t.chat(player.pos));
   for (const it of interactables) consider(it.pos, it.r, it.label, it.act);
   return best;
 }
@@ -405,10 +416,12 @@ function updateLabels() {
     const show = a.root.visible && (a.label.classList.contains('barking') || (a.name !== undefined && camera.position.distanceTo(a.pos) < 14));
     placeLabel(a.label, a.pos, a.labelH, 22, !show);
   }
+  for (const t of wilds.travellers) placeLabel(t.label, t.pos, 2.35 * (t.role.style.scale ?? 1), 26, !t.active);
 }
 
 // ---------- Main loop ----------
 const helpEl = $('help');
+const keysEl = $('keys');
 const statsEl = $('stats');
 let started = false;
 let showStats = false;
@@ -427,10 +440,11 @@ function frame(now: number) {
 
   if (!started) {
     if (input.anyHit()) { started = true; helpEl.classList.add('hidden'); }
-  } else if (input.hit('KeyH') && !dialogue.active) {
+  } else if ((input.hit('KeyH') || input.hit('Question')) && !dialogue.active) {
     helpEl.classList.toggle('hidden');
   }
   const paused = !started || !helpEl.classList.contains('hidden');
+  keysEl.classList.toggle('hidden', paused || dialogue.active);
 
   if (input.hit('KeyQ')) { qIndex = (qIndex + 1) % QUALITIES.length; renderScale = 1; applyQuality(); }
   if (input.hit('KeyM')) state.toast(sfx.toggleMute() ? 'Sound off' : 'Sound on');
@@ -496,6 +510,7 @@ function frame(now: number) {
     if (input.hit('KeyX')) chaos.trigger();
     chaos.update(dt);
     railway.update(dt);
+    wilds.update(dt, player.pos);
     if (chaos.activeTitles.join() !== lastChaos) { lastChaos = chaos.activeTitles.join(); updateQuestLog(); }
 
     // Interaction prompt

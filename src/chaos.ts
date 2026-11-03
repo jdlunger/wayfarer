@@ -115,9 +115,22 @@ export interface ChaosWorld {
   animals: Animal[];
   labels: HTMLElement;
   canHitPlayer: () => boolean;
+  /** Anything else that can be knocked about (wandering travellers...). */
+  extras?: Flingable[];
 }
 
-type Body = { kind: 'player' } | { kind: 'npc'; n: NPC } | { kind: 'animal'; a: Animal };
+/** Minimal interface for other things the chaos (and the trains) can send flying. */
+export interface Flingable {
+  readonly pos: THREE.Vector3;
+  readonly airborne: boolean;
+  readonly active: boolean;
+  launch(v: THREE.Vector3): void;
+  /** Something big is coming: get out of the way. */
+  scare(from: THREE.Vector3, line?: string): void;
+  bark(text: string): void;
+}
+
+type Body = { kind: 'player' } | { kind: 'npc'; n: NPC } | { kind: 'animal'; a: Animal } | { kind: 'other'; o: Flingable };
 
 export class Chaos {
   shake = 0;
@@ -128,13 +141,9 @@ export class Chaos {
   private fires: Fire[] = [];
   private light = new THREE.PointLight('#ff8a3a', 0, 60, 1);
   private running: Running[] = [];
-  /** Seconds until the next event (first one comes a little sooner). */
-  private cooldown = 20;
-  /** Pending quick follow-up event. */
-  private double = -1;
+  /** Seconds until the next event (the first one comes a little sooner). */
+  private cooldown = 40;
   private lastIds: string[] = [];
-  private bannerEl = document.getElementById('chaos')!;
-  private bannerT = 0;
   private spawned: { a: Animal; until: number }[] = [];
   private bolts: THREE.Mesh[] = [];
   private boltT = 0;
@@ -162,13 +171,11 @@ export class Chaos {
   // ---------- Director ----------
   update(dt: number) {
     this.cooldown -= dt;
-    // Roughly every 30 s; one time in four a second event piles on a few seconds later.
+    // About one event a minute.
     if (this.cooldown <= 0) {
-      this.cooldown = rnd(27, 33);
+      this.cooldown = rnd(55, 65);
       this.trigger();
-      if (Math.random() < 0.25) this.double = rnd(3, 6);
     }
-    if (this.double > 0 && (this.double -= dt) <= 0) { this.double = -1; this.trigger(); }
     for (const r of [...this.running]) {
       r.t += dt;
       r.tick(dt, r.t);
@@ -198,7 +205,6 @@ export class Chaos {
     this.tintAmt += (this.tintWant - this.tintAmt) * Math.min(1, dt * 1.5);
     this.flash *= Math.exp(-dt * 9);
     this.shake *= Math.exp(-dt * 3);
-    if (this.bannerT > 0 && (this.bannerT -= dt) <= 0) this.bannerEl.classList.remove('show');
   }
 
   /** Start a random (or named) event. */
@@ -215,16 +221,7 @@ export class Chaos {
     this.running.push(run);
     this.lastIds = [def.id, ...this.lastIds].slice(0, 4);
     this.count++;
-    this.banner(def.title, def.sub);
-  }
-
-  banner(title: string, sub: string) {
     sfx.play('sting', null, { vol: 0.8 });
-    this.bannerEl.innerHTML = `<b>${title}</b><small>${sub}</small>`;
-    this.bannerEl.classList.remove('show');
-    void this.bannerEl.offsetWidth;
-    this.bannerEl.classList.add('show');
-    this.bannerT = 3.2;
   }
 
   get activeTitles() { return this.running.map(r => r.def.title); }
@@ -266,11 +263,17 @@ export class Chaos {
       const d = flat(a.pos, at);
       if (d < r) fn({ kind: 'animal', a }, a.pos, d);
     }
+    for (const o of this.w.extras ?? []) {
+      if (!o.active) continue;
+      const d = flat(o.pos, at);
+      if (d < r) fn({ kind: 'other', o }, o.pos, d);
+    }
   }
 
   private launch(b: Body, v: THREE.Vector3) {
     if (b.kind === 'player') { if (!this.w.player.airborne) sfx.play('boing', null, { gap: 0.2 }); this.w.player.launch(v); }
     else if (b.kind === 'npc') { if (!b.n.air && v.y > 6) sfx.play('scream', b.n.pos, { range: 60, gap: 0.25 }); b.n.launch(v); }
+    else if (b.kind === 'other') { if (!b.o.airborne && v.y > 6) sfx.play('scream', b.o.pos, { range: 60, gap: 0.25 }); b.o.launch(v); }
     else b.a.launch(v);
   }
 
@@ -399,7 +402,7 @@ export class Chaos {
     for (const a of this.w.animals) if (!a.spec.fly && !a.air && !a.puppet && !a.lost && flat(a.pos, this.p) < r) pool.push({ kind: 'animal', a });
     return pool.length ? pick(pool) : null;
   }
-  private posOf(b: Body) { return b.kind === 'player' ? this.p : b.kind === 'npc' ? b.n.pos : b.a.pos; }
+  private posOf(b: Body) { return b.kind === 'player' ? this.p : b.kind === 'npc' ? b.n.pos : b.kind === 'other' ? b.o.pos : b.a.pos; }
 
   private spawn(kind: AnimalKind, at: THREE.Vector3, life: number, range = 8) {
     const a = new Animal(kind, at, this.w.scene, this.w.labels, { range, variant: (Math.random() * 4) | 0 });
@@ -718,7 +721,7 @@ const EVENTS: EventDef[] = [
               vp.z += (g.position.z - vp.z) * Math.min(1, dt * 3);
               vp.y += dt * 3;
               if (victim!.kind === 'animal') { const a = victim!.a; a.root.position.copy(vp); a.yaw += dt * 4; a.root.rotation.set(0, a.yaw, 0); }
-              if (vp.y > g.position.y - 1) { phase = 'leave'; if (victim!.kind === 'animal') victim!.a.root.visible = false; else victim!.n.char.root.scale.setScalar(0.001); }
+              if (vp.y > g.position.y - 1) { phase = 'leave'; if (victim!.kind === 'animal') victim!.a.root.visible = false; else if (victim!.kind === 'npc') victim!.n.char.root.scale.setScalar(0.001); }
             }
             for (let k = 0; k < 4; k++) this._fx.emit(g.position.x + rnd(-3, 3), g.position.y - rnd(0, H), g.position.z + rnd(-3, 3), 0, rnd(3, 6), 0, rnd(0.5, 1), 0.15, pick(['#7dff9a', '#c8ffd4', '#ffffff']), 0, 0.5);
           } else {
@@ -736,7 +739,7 @@ const EVENTS: EventDef[] = [
             vp.set(home.x + rnd(-3, 3), home.y + 30, home.z + rnd(-3, 3));
             const v = V(0, -2, 0);
             if (victim.kind === 'animal') { const a = victim.a; a.puppet = false; a.root.visible = true; a.launch(v); setTimeout(() => a.bark(pick(['Moo...?', '*vacant stare*', '...', '*thousand-yard stare*'])), 2500); }
-            else { const n = victim.n; n.puppet = false; n.char.root.scale.setScalar(1); n.char.root.rotation.set(0, n.yaw, 0); n.launch(v); setTimeout(() => n.bark(pick(["I've seen things.", 'They were very polite.', 'They probed my cheese.', 'I am different now.']), 4), 2500); }
+            else if (victim.kind === 'npc') { const n = victim.n; n.puppet = false; n.char.root.scale.setScalar(1); n.char.root.rotation.set(0, n.yaw, 0); n.launch(v); setTimeout(() => n.bark(pick(["I've seen things.", 'They were very polite.', 'They probed my cheese.', 'I am different now.']), 4), 2500); }
             state.toast(`${vName[0].toUpperCase() + vName.slice(1)} falls out of the sky!`);
           }
         },

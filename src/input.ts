@@ -4,7 +4,7 @@ const BLOCK = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space
 
 window.addEventListener('keydown', e => {
   if (BLOCK.has(e.code)) e.preventDefault();
-  if (!e.repeat) pressed.add(e.code);
+  if (!e.repeat) { pressed.add(e.code); if (e.key === '?') pressed.add('Question'); }
   held.add(e.code);
 });
 window.addEventListener('keyup', e => held.delete(e.code));
