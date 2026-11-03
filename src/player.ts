@@ -3,6 +3,7 @@ import { Character, Pose, PropKind } from './character';
 import { input } from './input';
 import { floorHeight, WATER_Y, WORLD_LIMIT } from './terrain';
 import { resolve } from './colliders';
+import { state } from './state';
 
 const SWIM_DEPTH = 1.25;   // water deeper than this → swimming
 const GRAVITY = 24;
@@ -24,7 +25,23 @@ export class Player {
   /** Held pose (sitting, dancing) until the player moves. */
   private hold: Pose | null = null;
 
+  /** Knockback velocity from explosions, tornadoes, stampedes... */
+  private push = new THREE.Vector3();
+  private tumble = 0;
+
   get busy() { return this.action !== null; }
+  get airborne() { return !this.grounded; }
+
+  /** Get thrown through the air. */
+  launch(v: THREE.Vector3) {
+    if (this.swimming) return;
+    this.push.x += v.x; this.push.z += v.z;
+    if (v.y > 0) { this.vy = Math.max(this.vy, v.y); this.grounded = false; this.pos.y += 0.05; }
+    this.hold = null;
+    if (v.length() > 11) this.tumble = 1;
+  }
+  /** Shove sideways without lifting. */
+  nudge(x: number, z: number) { this.push.x += x; this.push.z += z; }
 
   doAction(pose: Pose, dur: number, prop: PropKind | null, done?: () => void) {
     this.action = { pose, t: dur, done };
@@ -111,6 +128,12 @@ export class Player {
       if (turn !== 0) this.yaw += d * Math.min(1, dt * 10);
     }
 
+    // Knockback
+    if (this.push.lengthSq() > 1e-4) {
+      this.pos.x += this.push.x * dt; this.pos.z += this.push.z * dt;
+      this.push.multiplyScalar(Math.exp(-dt * (this.grounded ? 7 : 0.4)));
+    }
+
     if (!this.hold) resolve(this.pos, 0.4);
 
     // Stay on the island
@@ -128,7 +151,7 @@ export class Player {
       this.grounded = true;
     } else {
       if (this.grounded && enabled && input.hit('Space')) { this.vy = 8 * this.jumpBoost; this.grounded = false; this.hold = null; }
-      this.vy -= GRAVITY * dt;
+      this.vy -= GRAVITY * state.gravity * dt;
       this.pos.y += this.vy * dt;
       if (this.pos.y <= floor) {
         this.pos.y = floor; this.vy = 0; this.grounded = true;
@@ -142,6 +165,8 @@ export class Player {
 
     this.char.root.position.copy(this.pos);
     this.char.root.rotation.y = this.yaw;
+    if (this.tumble > 0 && !this.grounded) this.char.root.rotation.x += dt * 9;
+    else if (this.grounded) { this.tumble = 0; this.char.root.rotation.x = 0; }
     this.char.animate(dt, groundSpeed * 0.75, !this.grounded, this.swimming, pose);
     this.char.setGroundOffset(this.swimming ? -10 : ground - this.pos.y);
   }

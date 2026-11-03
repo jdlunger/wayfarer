@@ -9,6 +9,7 @@ import { Animal, spawnAnimals } from './animals';
 import { state, SHARDS_NEEDED, ITEMS, Item, isNight, isFestival, addCoins } from './state';
 import { interactables, svc } from './interact';
 import { Dialogue } from './dialogue';
+import { Chaos } from './chaos';
 import { clamp, lerp, smoothstep } from './noise';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -86,6 +87,7 @@ console.log(`World built in ${(performance.now() - loading).toFixed(0)} ms — $
 
 const dialogue = new Dialogue();
 let talkingTo: NPC | null = null;
+const chaos = new Chaos({ scene, player, npcs, animals, labels: labelsEl, canHitPlayer: () => !dialogue.active });
 
 // ---------- Services used by world objects ----------
 svc.dialog = (name, script, onClose) => dialogue.open(name, script, () => { onClose?.(); updateQuestLog(); });
@@ -144,6 +146,7 @@ function updateQuestLog() {
   const inv = (Object.keys(ITEMS) as Item[]).filter(k => state.inv[k] > 0).map(k => `${ITEMS[k].icon}${state.inv[k]}`);
   if (state.coins) inv.unshift(`🪙${state.coins}`);
   if (inv.length) lines.push(`<span class="inv">${inv.join('  ')}</span>`);
+  if (chaos.activeTitles.length) lines.push(`<span class="chaos">${chaos.activeTitles.join('<br>')}</span>`);
   $('quest').innerHTML = `<h3>Journal</h3>${lines.join('<br>')}`;
 }
 
@@ -394,6 +397,7 @@ let showStats = false;
 let frames = 0, fpsTime = 0, fps = 0, slowTime = 0, logicAcc = 0;
 let last = performance.now();
 let mapTick = 0;
+let lastChaos = '';
 updateQuestLog();
 
 function frame(now: number) {
@@ -414,6 +418,7 @@ function frame(now: number) {
   if (input.hit('KeyF')) { showStats = !showStats; statsEl.style.display = showStats ? 'block' : 'none'; }
 
   const { lightDir } = updateSky(paused ? 0 : dt);
+  chaos.applySky(skyUniforms.top.value, skyUniforms.bottom.value, (scene.fog as THREE.Fog).color, scene.background as THREE.Color, hemi);
 
   if (!paused) {
     const inDialogue = dialogue.active;
@@ -469,6 +474,9 @@ function frame(now: number) {
     if (state.pip === 'found' && pip.pos.distanceTo(player.pos) > 60 && pip.pos.length() > 40) pip.teleport(pip.def.home);
 
     village.update(dt);
+    if (input.hit('KeyX')) chaos.trigger();
+    chaos.update(dt);
+    if (chaos.activeTitles.join() !== lastChaos) { lastChaos = chaos.activeTitles.join(); updateQuestLog(); }
 
     // Interaction prompt
     const near = !inDialogue && !player.busy ? nearestInteraction() as Choice | null : null;
@@ -496,6 +504,7 @@ function frame(now: number) {
   }
 
   updateCamera(dt, dialogue.active || paused);
+  if (!paused) chaos.applyCamera(camera);
 
   // Shadow camera follows the player; snap to texels to prevent shimmering.
   const texel = 90 / sun.shadow.mapSize.x;
@@ -534,4 +543,4 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // Handy for debugging from the browser console.
-(window as unknown as Record<string, unknown>).game = { player, npcs, animals, shards, state, village, setTime: (t: number) => { state.time = t; } };
+(window as unknown as Record<string, unknown>).game = { player, npcs, animals, shards, state, village, chaos, setTime: (t: number) => { state.time = t; } };

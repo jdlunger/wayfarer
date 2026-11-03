@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { bake, charMat, Piece, SHAPES } from './character';
-import { floorHeight, isWet, inPond, POND, groundNormalY } from './terrain';
+import { floorHeight, isWet, inPond, POND, groundNormalY, WORLD_LIMIT } from './terrain';
 import { resolve } from './colliders';
 import { state, take, Item, ITEMS } from './state';
 import { svc } from './interact';
@@ -286,6 +286,10 @@ export class Animal {
   follow: { target: THREE.Vector3; until: number } | null = null;
   /** Quest animals that need leading home. */
   lost = false;
+  /** Flying through the air (explosions, tornadoes, frog rain...). */
+  air: { v: THREE.Vector3; spin: number } | null = null;
+  /** Position is driven externally (stampedes, tractor beams...). */
+  puppet = false;
   hidden = false;
   /** Small critters skip shadows and are culled sooner. */
   readonly small: boolean;
@@ -336,6 +340,42 @@ export class Animal {
     if (this.barkCd <= 0 || Math.random() < 0.3) this.bark(this.kind === 'cat' ? 'Hssss!' : undefined);
   }
 
+  launch(v: THREE.Vector3) {
+    if (this.spec.fly || this.puppet) return;
+    if (this.air) { this.air.v.add(v); return; }
+    this.air = { v: v.clone(), spin: (Math.random() - 0.5) * 20 };
+    this.pos.y += 0.05;
+    if (Math.random() < 0.6) this.bark(this.kind === 'cat' ? 'MRROOOWW!' : this.kind === 'frog' ? 'RIBBIIIIT!' : this.spec.sounds[(Math.random() * this.spec.sounds.length) | 0].toUpperCase());
+  }
+
+  private updateAir(dt: number) {
+    const a = this.air!;
+    a.v.y -= 24 * state.gravity * dt;
+    const nx = this.pos.x + a.v.x * dt, nz = this.pos.z + a.v.z * dt;
+    if ((!this.spec.swim && isWet(nx, nz) && !isWet(this.pos.x, this.pos.z)) || Math.hypot(nx, nz) > WORLD_LIMIT) { a.v.x *= -0.6; a.v.z *= -0.6; }
+    else { this.pos.x = nx; this.pos.z = nz; }
+    this.pos.y += a.v.y * dt;
+    const floor = floorHeight(this.pos.x, this.pos.z);
+    if (this.pos.y <= floor && a.v.y <= 0) {
+      this.pos.y = floor;
+      this.air = null;
+      this.parts.model.rotation.z = 0;
+      if (this.spec.swim && !inPond(this.pos.x, this.pos.z, -0.5)) this.pos.copy(this.home);
+      this.mode = 'idle'; this.timer = 0.5 + Math.random(); this.act = 'look';
+    } else {
+      this.parts.model.rotation.x += a.spin * dt;
+      this.parts.model.rotation.z += a.spin * 0.5 * dt;
+    }
+    this.root.position.copy(this.pos);
+  }
+
+  /** Move under external control (keeps the walk cycle animating). */
+  puppetStep(dt: number, speed: number, yaw: number) {
+    this.speed = speed;
+    this.yaw = yaw;
+    this.animate(dt);
+  }
+
   // ---------- player interaction ----------
   promptLabel(): string | null {
     if (this.spec.fly || this.hidden) return null;
@@ -379,6 +419,8 @@ export class Animal {
     this.t += dt;
     if (this.barkTimer > 0 && (this.barkTimer -= dt) <= 0) this.label.classList.remove('barking');
     this.barkCd -= dt;
+    if (this.puppet) return;
+    if (this.air) return this.updateAir(dt);
     if (this.spec.fly) return this.updateFly(dt, w);
 
     const sp = this.spec;

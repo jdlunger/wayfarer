@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Character, CharStyle, Pose, PropKind } from './character';
 import { DScript, DOption } from './dialogue';
-import { floorHeight, isWet } from './terrain';
+import { floorHeight, isWet, WORLD_LIMIT } from './terrain';
 import { resolve } from './colliders';
 import { state, SHARDS_NEEDED, take, addCoins, ITEMS, Item, isNight, isFestival } from './state';
 import type { Animal, Villager } from './animals';
@@ -79,6 +79,10 @@ export class NPC implements Villager {
   fled = false;
   /** Indoors for the night. */
   atHome = false;
+  /** Flying through the air after an explosion/tornado/etc. */
+  air: { v: THREE.Vector3; spin: number } | null = null;
+  /** Position is driven externally (e.g. by a tractor beam). */
+  puppet = false;
   readonly label: HTMLDivElement;
   private bubble: HTMLDivElement;
 
@@ -120,6 +124,41 @@ export class NPC implements Villager {
     this.mode = 'flee';
     this.timer = 2.5;
     this.target.copy(this.pos).sub(from).setY(0).normalize().multiplyScalar(40).add(this.pos);
+  }
+
+  /** Get thrown through the air. */
+  launch(v: THREE.Vector3) {
+    if (this.atHome || this.mode === 'talk' || this.puppet) return;
+    this.endSocial();
+    this.react = null;
+    if (this.mode === 'react') this.mode = 'task';
+    if (this.air) { this.air.v.add(v); return; }
+    this.air = { v: v.clone(), spin: (Math.random() - 0.5) * 16 };
+    this.pos.y += 0.05;
+  }
+
+  private updateAir(dt: number) {
+    const a = this.air!;
+    a.v.y -= 24 * state.gravity * dt;
+    const nx = this.pos.x + a.v.x * dt, nz = this.pos.z + a.v.z * dt;
+    if (isWet(nx, nz) || Math.hypot(nx, nz) > WORLD_LIMIT) { a.v.x *= -0.6; a.v.z *= -0.6; }
+    else { this.pos.x = nx; this.pos.z = nz; }
+    this.pos.y += a.v.y * dt;
+    const floor = floorHeight(this.pos.x, this.pos.z);
+    const root = this.char.root;
+    if (this.pos.y <= floor && a.v.y <= 0) {
+      this.pos.y = floor;
+      this.air = null;
+      root.rotation.x = root.rotation.z = 0;
+      this.mode = 'task'; this.phase = 'go'; this.task = null;
+      this.startReact('scared', 1.6, this.pos.clone().add(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)), LANDINGS[(Math.random() * LANDINGS.length) | 0]);
+    } else {
+      root.rotation.x += a.spin * dt;
+      root.rotation.z += a.spin * 0.4 * dt;
+    }
+    root.position.copy(this.pos);
+    this.char.animate(dt, 0, true);
+    this.char.setGroundOffset(floor - this.pos.y);
   }
 
   teleport(p: THREE.Vector3) {
@@ -213,6 +252,14 @@ export class NPC implements Villager {
       this.mode = 'task';
       this.task = null;
     }
+
+    if (this.puppet) {
+      this.char.root.position.copy(this.pos);
+      this.char.root.rotation.x += dt * 3;
+      this.char.animate(dt, 0, true);
+      return;
+    }
+    if (this.air) { this.updateAir(dt); return; }
 
     if (talkingToMe) {
       if (this.mode !== 'talk') this.endSocial();
@@ -437,6 +484,8 @@ export class NPC implements Villager {
     }
   }
 }
+
+const LANDINGS = ['OW!', 'My spine!', 'I can fly! ...Could. Past tense.', 'Who threw me?!', 'Ugh.', 'Not again!', 'I landed on a chicken.', '*groans*', 'AAAAAAAAH— oh. Over.', 'Ten out of ten. Would not fly again.'];
 
 // ---------- Society: villagers interacting with each other ----------
 

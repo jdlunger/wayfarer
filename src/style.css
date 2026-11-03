@@ -72,3 +72,23 @@ body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #f4
 #help td:first-child { text-align: right; }
 #help .start { margin-top: 22px; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
+
+#quest .chaos { display: inline-block; margin-top: 6px; color: #ff9a6a; font-weight: 700; font-size: 13px; letter-spacing: .03em; }
+
+#chaos {
+  position: fixed; top: 9%; left: 50%; transform: translateX(-50%) scale(0.6); text-align: center; pointer-events: none; opacity: 0;
+  font-family: Impact, "Arial Black", system-ui, sans-serif; color: #fff2d6;
+  text-shadow: 0 0 12px #ff3b1f, 0 3px 0 #7a1a08, 0 6px 14px #000;
+}
+#chaos b { display: block; font-size: clamp(28px, 6vw, 64px); letter-spacing: .04em; }
+#chaos small { display: block; font: italic 600 clamp(14px, 2vw, 19px) Georgia, serif; color: #ffe0b0; text-shadow: 0 2px 4px #000; }
+#chaos.show { animation: chaosSlam 3.2s cubic-bezier(.2, 1.6, .4, 1) forwards; }
+@keyframes chaosSlam {
+  0% { opacity: 0; transform: translateX(-50%) scale(2.6) rotate(-6deg); }
+  10% { opacity: 1; transform: translateX(-50%) scale(1) rotate(2deg); }
+  14% { transform: translateX(calc(-50% - 8px)) scale(1.04) rotate(-2deg); }
+  18% { transform: translateX(calc(-50% + 8px)) scale(1) rotate(1deg); }
+  22% { transform: translateX(-50%) scale(1) rotate(0); }
+  85% { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) scale(0.9) translateY(-20px); }
+}

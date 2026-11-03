@@ -42,6 +42,8 @@ export const state = {
   /** A bard performance or festival everyone nearby joins. */
   party: null as null | { x: number; z: number; until: number },
   clock: 0,
+  /** Gravity multiplier (the chaos director messes with this). */
+  gravity: 1,
 
   onQuestDone: () => {},
   toast: (_msg: string) => {},
